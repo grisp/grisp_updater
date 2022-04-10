@@ -1,0 +1,35 @@
+-module(grisp_updater).
+
+
+%--- Exports -------------------------------------------------------------------
+
+% API functions
+-export([update/1, update/2]).
+-export([start/3, start/4]).
+-export([cancel/0]).
+-export([validate/0]).
+
+
+%--- API Functions -------------------------------------------------------------
+
+update(Url) ->
+    grisp_updater_manager:update(Url, #{}).
+
+update(Url, Opts) ->
+    grisp_updater_manager:update(Url, Opts).
+
+start(Url, Callbacks, Params) ->
+    start(Url, Callbacks, Params, #{}).
+
+start(Url, Callbacks, Params, Opts) ->
+    grisp_updater_manager:start_update(Url, Callbacks, Params, Opts).
+
+cancel() ->
+    grisp_updater_manager:cancel_update().
+
+validate() ->
+    grisp_updater_manager:validate().
+
+
+%--- Internal Functions --------------------------------------------------------
+

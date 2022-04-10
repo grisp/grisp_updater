@@ -1,0 +1,22 @@
+[
+    {grisp_updater, [
+        %{storage, {grisp_updater_filesystem, #{}}},
+        %{system, {grisp_updater_dummy, #{}}},
+        %{source, {grisp_updater_tarball, #{}}}
+    ]},
+
+    {kernel, [
+        {logger_level, debug},
+        {logger, [
+            {handler, default, logger_std_h, #{
+                level => info,
+                filter_default => debug,
+                config => #{type => standard_io},
+                formatter => {logger_formatter, #{
+                    legacy_header => false,
+                    single_line => true
+                }}
+            }}
+        ]}
+    ]}
+].
