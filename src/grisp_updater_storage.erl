@@ -51,6 +51,8 @@
 
 %--- Macros --------------------------------------------------------------------
 
+%FIXME: Should probably not be infinity
+-define(TIMEOUT, infinity).
 -define(DIGEST_BLOCK_SIZE, 65536).
 
 
@@ -60,13 +62,13 @@ start_link(Opts) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, Opts, []).
 
 digest(Type, Device, Seek, Size) ->
-    gen_server:call(?MODULE, {digest, Type, Device, Seek, Size}).
+    gen_server:call(?MODULE, {digest, Type, Device, Seek, Size}, ?TIMEOUT).
 
 read(Device, Seek, Size) ->
-    gen_server:call(?MODULE, {read, Device, Seek, Size}).
+    gen_server:call(?MODULE, {read, Device, Seek, Size}, ?TIMEOUT).
 
 write(Device, Seek, Data) ->
-    gen_server:call(?MODULE, {write, Device, Seek, Data}).
+    gen_server:call(?MODULE, {write, Device, Seek, Data}, ?TIMEOUT).
 
 
 %--- Callbacks -----------------------------------------------------------------

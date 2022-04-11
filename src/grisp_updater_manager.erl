@@ -85,7 +85,7 @@ update(Url, Opts) ->
     Msg = {start_update, Url, grisp_updater_progress, ProgressOpts, Opts},
     case gen_statem:call(?MODULE, Msg, infinity) of
         {error, _Reason} = Error -> Error;
-        ok -> grisp_updater_progress:wait(ProgressOpts)
+        ok -> grisp_updater_progress:wait(?MODULE, ProgressOpts)
     end.
 
 start_update(Url, Callbacks, Params, Opts) ->
@@ -139,6 +139,15 @@ ready({call, From}, {start_update, Url, Callbacks, Params, Opts}, Data) ->
     end;
 ready({call, From}, cancel_update, _Data) ->
     {keep_state_and_data, [{reply, From, {error, not_updating}}]};
+ready({call, From}, validate, Data) ->
+    case system_validate(Data) of
+        {error, Reason} = Error ->
+            ?LOG_ERROR("Error validating running system: ~p", [Reason]),
+            {keep_state_and_data, [{reply, From, Error}]};
+        {ok, Data2} ->
+            ?LOG_INFO("Running system validated", []),
+            {keep_state, Data2, [{reply, From, ok}]}
+    end;
 ready(EventType, Event, Data) ->
     handle_event(EventType, Event, ready, Data).
 
@@ -148,8 +157,7 @@ updating({call, From}, cancel_update, _Data) ->
     %TODO: Implemente cancelation
     {keep_state_and_data, [{reply, From, {error, not_implemented}}]};
 updating({call, From}, validate, _Data) ->
-    %TODO: Implemente validation
-    {keep_state_and_data, [{reply, From, {error, not_implemented}}]};
+    {keep_state_and_data, [{reply, From, {error, updating}}]};
 updating(cast, {checker_done, BlockId, Outcome}, Data) ->
     case got_checker_done(Data, BlockId, Outcome) of
         {ok, Data2} -> {keep_state, Data2};
@@ -231,19 +239,24 @@ do_start_update(#data{update = Up} = Data,
         {error, _Reason} = Error -> Error;
         {ok, SysId, SysTarget} ->
             ?LOG_INFO("System selected for update: ~w", [SysId]),
-            #manifest{block_count = BlockCount, data_size = DataSize} = Manifest,
-            Data2 = Data#data{
-                update = Up#update{
-                    manifest = Manifest,
-                    system_id = SysId,
-                    objects = Objs,
-                    targets = #{
-                        global => global_target(Data),
-                        system => SysTarget
-                    }
-                }
-            },
-            {ok, stats_init(Data2, BlockCount, DataSize)}
+            case system_prepare_update(Data, SysId) of
+                {error, _Reason} = Error -> Error;
+                {ok, Data2} ->
+                    #manifest{block_count = BlockCount,
+                              data_size = DataSize} = Manifest,
+                    Data3 = Data2#data{
+                        update = Up#update{
+                            manifest = Manifest,
+                            system_id = SysId,
+                            objects = Objs,
+                            targets = #{
+                                global => global_target(Data),
+                                system => SysTarget
+                            }
+                        }
+                    },
+                    {ok, stats_init(Data3, BlockCount, DataSize)}
+            end
     end.
 
 check_structure(_Data, _Manifest) ->
@@ -254,9 +267,12 @@ select_update_target(_Data, #manifest{structure = undefined}) ->
     {error, missing_structure};
 select_update_target(Data, Manifest) ->
     case system_get_active(Data) of
+        {removable, _} ->
+            ?LOG_ERROR("Cannot update from a removable media", []),
+            {error, current_system_removable};
         {_, false} ->
             ?LOG_ERROR("Cannot update from a system that is not validated", []),
-            {error, system_not_validated};
+            {error, current_system_not_validated};
         {CurrSysId, true} ->
             ?LOG_INFO("Current validate system: ~w", [CurrSysId]),
             select_next_system(Data, CurrSysId, Manifest)
@@ -537,6 +553,12 @@ system_get_active(#data{system = {Mod, Sub}}) ->
 system_device(#data{system = {Mod, Sub}}) ->
     Mod:system_device(Sub).
 
+system_prepare_update(#data{system = {Mod, Sub}} = Data, SysId) ->
+    case Mod:system_prepare_update(Sub, SysId) of
+        {error, _Reason} = Error -> Error;
+        {ok, Sub2} -> {ok, Data#data{system = {Mod, Sub2}}}
+    end.
+
 system_set_updated(#data{system = {Mod, Sub}} = Data, SysId) ->
     case Mod:system_set_updated(Sub, SysId) of
         {error, _Reason} = Error -> Error;
@@ -564,8 +586,8 @@ progress_init(#update{progress = undefined} = Up, Mod, Opts) ->
 progress_update(#update{progress = {Mod, Params}}, Stats) ->
     Mod:progress_update(Params, Stats).
 
-progress_warning(#update{progress = {Mod, Params}}, Msg, Reason) ->
-    Mod:progress_warning(Params, Msg, Reason).
+% progress_warning(#update{progress = {Mod, Params}}, Msg, Reason) ->
+%     Mod:progress_warning(Params, Msg, Reason).
 
 progress_error(#update{progress = {Mod, Params}}, Stats, Reason) ->
     Mod:progress_error(Params, Stats, Reason).

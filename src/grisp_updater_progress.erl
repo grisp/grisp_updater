@@ -44,7 +44,7 @@
 %--- Exports -------------------------------------------------------------------
 
 -export([options/0]).
--export([wait/1]).
+-export([wait/2]).
 
 % Behaviour grisp_updater_progress callbacks
 -export([progress_init/1]).
@@ -68,10 +68,16 @@
 options() ->
     #{caller => self(), ref => make_ref()}.
 
-wait(#{ref := Ref}) ->
+wait(Proc, #{ref := Ref}) ->
+    MonRef = erlang:monitor(process, Proc),
     receive
-        {done, Ref} -> ok;
-        {error, Ref, Reason} -> {error, Reason}
+        {'DOWN', MonRef, process, _, Reason} -> {error, Reason};
+        {done, Ref} ->
+            erlang:demonitor(MonRef, [flush]),
+            ok;
+        {error, Ref, Reason} ->
+            erlang:demonitor(MonRef, [flush]),
+            {error, Reason}
     end.
 
 
@@ -88,7 +94,7 @@ progress_update(#state{last_log = LastLog} = State, Stats) ->
     case (erlang:system_time(millisecond) - LastLog) > 1000 of
         false -> {ok, State};
         true ->
-            ?LOG_INFO("Update progress: ~2b%", [progress_percent(Stats)]),
+            ?LOG_INFO("Update progress: ~b%", [progress_percent(Stats)]),
             {ok, #state{last_log = erlang:system_time(millisecond)}}
     end.
 
@@ -113,4 +119,4 @@ progress_done(#state{caller = Caller, ref = Ref}, _Stats) ->
 progress_percent(Stats) ->
     #{data_total := Total, data_checked := Checked,
       data_skipped := Skipped, data_written := Written} = Stats,
-    (Total * 2 * 100) div (Checked + Skipped + Written).
+    (Checked + Skipped + Written) * 100 div (Total * 2).

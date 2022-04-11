@@ -14,6 +14,7 @@
 -export([system_init/1]).
 -export([system_device/1]).
 -export([system_get_active/1]).
+-export([system_prepare_update/2]).
 -export([system_set_updated/2]).
 -export([system_validate/1]).
 -export([system_terminate/2]).
@@ -67,6 +68,10 @@ system_device(#state{device = Device}) ->
 
 system_get_active(_State) ->
     {0, true}.
+
+system_prepare_update(State, 1) ->
+    ?LOG_DEBUG("Preparing system 1 for update", []),
+    {ok, State}.
 
 system_set_updated(State, SystemId) ->
     ?LOG_DEBUG("System ~b marked as update", [SystemId]),

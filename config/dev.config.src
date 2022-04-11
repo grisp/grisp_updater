@@ -6,11 +6,11 @@
     ]},
 
     {kernel, [
-        {logger_level, debug},
+        {logger_level, info},
         {logger, [
             {handler, default, logger_std_h, #{
                 level => info,
-                filter_default => debug,
+                filter_default => log,
                 config => #{type => standard_io},
                 formatter => {logger_formatter, #{
                     legacy_header => false,

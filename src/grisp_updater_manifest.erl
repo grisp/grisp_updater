@@ -190,7 +190,7 @@ filter_object_action(_Type, Props, Stack, #{action := Action}) ->
 filter_object_action(_type, _Props, _Stack, _Opts) ->
     true.
 
-filter_object_flags(bootloader, _Props, _Stack, #{allow_bootloader := true}) ->
+filter_object_flags(bootloader, _Props, _Stack, #{update_bootloader := true}) ->
     true;
 filter_object_flags(bootloader, _Props, _Stack, _Opts) ->
     false;

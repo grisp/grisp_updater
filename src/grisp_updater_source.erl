@@ -144,7 +144,8 @@ terminate(Reason, #state{sessions = Sessions, streams = Streams} = State) ->
 
 start_loading(State, Url, Path, From) ->
     case get_session(State, Url) of
-        {error, _Reason} = Error -> Error;
+        {error, Reason} ->
+            {error, Reason, State};
         {ok, SessRef, State2} ->
             case source_stream(State2, SessRef, Path, #{}) of
                 {error, Reason} ->
@@ -160,7 +161,8 @@ start_loading(State, Url, Path, From) ->
 
 start_streaming(State, Url, Path, SinkMod, SinkParams) ->
     case get_session(State, Url) of
-        {error, _Reason} = Error -> Error;
+        {error, Reason} ->
+            {error, Reason, State};
         {ok, SessRef, State2} ->
             case source_stream(State2, SessRef, Path, #{}) of
                 {error, Reason} ->

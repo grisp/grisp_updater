@@ -15,10 +15,12 @@
 -callback system_device(State :: term()) ->
     Device :: binary().
 -callback system_get_active(State :: term()) ->
-    {system_id(), Validated :: boolean()}.
+    {system_id() | removable, Validated :: boolean() | undefined}.
+-callback system_prepare_update(State :: term(), system_id()) ->
+    {ok, State :: term()} | {error, term()}.
 -callback system_set_updated(State :: term(), system_id()) ->
     {ok, State :: term()} | {error, term()}.
 -callback system_validate(State :: term()) ->
-    ok | {error, term()}.
+    {ok, State :: term()} | {error, term()}.
 -callback system_terminate(State :: term(), Reason :: term()) ->
     ok.
