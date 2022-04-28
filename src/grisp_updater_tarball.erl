@@ -14,8 +14,7 @@
 -export([source_init/1]).
 -export([source_open/3]).
 -export([source_stream/4]).
--export([source_cancel/2]).
--export([source_handle/2]).
+-export([source_cancel/3]).
 -export([source_close/2]).
 -export([source_terminate/2]).
 
@@ -34,17 +33,24 @@ source_init(_Opts) ->
     {ok, #state{}}.
 
 source_open(#state{files = Files} = State, Url, _Opts) ->
-    case filelib:is_regular(Url) of
-        false ->
-            {error, {tarball_not_found, Url}};
-        true ->
-            SessRef = make_ref(),
-            {ok, SessRef, State#state{files = Files#{SessRef => Url}}}
+    case uri_string:parse(Url) of
+        #{scheme := <<"tarball">>, host := <<>>, path := Path} ->
+            case filelib:is_regular(Path) of
+                false ->
+                    {error, {tarball_not_found, Path}};
+                true ->
+                    SourceRef = make_ref(),
+                    {ok, SourceRef, State#state{
+                        files = Files#{SourceRef => Path}
+                    }}
+            end;
+        _ ->
+            not_supported
     end.
 
-source_stream(#state{files = Files} = State, SessRef, Path, _Opts) ->
-    case maps:find(SessRef, Files) of
-        error -> {error, unknown_session};
+source_stream(#state{files = Files} = State, SourceRef, Path, _Opts) ->
+    case maps:find(SourceRef, Files) of
+        error -> {error, unknown_source};
         {ok, Url} ->
             Filename = tarball_path(Path),
             case erl_tar:extract(Url, [memory, {files, [Filename]}]) of
@@ -54,14 +60,11 @@ source_stream(#state{files = Files} = State, SessRef, Path, _Opts) ->
             end
     end.
 
-source_cancel(State, _StreamRef) ->
+source_cancel(State, _SourceRef, _StreamRef) ->
     State.
 
-source_handle(_State, _Msg) ->
-    pass.
-
-source_close(#state{files = Files} = State, SessRef) ->
-    State#state{files = maps:remove(SessRef, Files)}.
+source_close(#state{files = Files} = State, SourceRef) ->
+    State#state{files = maps:remove(SourceRef, Files)}.
 
 source_terminate(_State, _Reason) ->
     ?LOG_INFO("Terminating tarball update source", []),

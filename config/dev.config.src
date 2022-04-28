@@ -2,7 +2,7 @@
     {grisp_updater, [
         %{storage, {grisp_updater_filesystem, #{}}},
         %{system, {grisp_updater_dummy, #{}}},
-        %{source, {grisp_updater_tarball, #{}}}
+        %{sources, [{grisp_updater_tarball, #{}}]}
     ]},
 
     {kernel, [

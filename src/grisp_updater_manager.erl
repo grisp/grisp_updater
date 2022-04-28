@@ -53,12 +53,12 @@
 }).
 
 -record(update, {
-    url :: undefined | binary(),
+    url :: binary(),
     progress :: undefined | {module(), term()},
     manifest :: undefined | term(),
-    stats :: grisp_updater_progress:statistics(),
-    system_id :: non_neg_integer(),
-    targets :: #{
+    stats :: undefined | grisp_updater_progress:statistics(),
+    system_id :: undefined | non_neg_integer(),
+    targets :: undefined | #{
         global := #target{},
         system := #target{}
     },
@@ -67,7 +67,7 @@
 }).
 
 -record(data, {
-    system :: {Mod :: module(), Sub :: term()},
+    system :: undefined | {Mod :: module(), Sub :: term()},
     update :: undefined | #update{}
 }).
 
@@ -175,8 +175,7 @@ updating(cast, {loader_done, BlockId}, Data) ->
     end;
 updating(cast, {loader_failed, BlockId, Reason}, Data) ->
     case got_loader_failed(Data, BlockId, Reason) of
-        {ok, Data2} -> {keep_state, Data2};
-        {done, Data2} -> {next_state, ready, Data2}
+        {ok, Data2} -> {keep_state, Data2}
     end;
 updating(cast, {loader_error, BlockId, Reason}, Data) ->
     case got_loader_error(Data, BlockId, Reason) of
@@ -185,12 +184,7 @@ updating(cast, {loader_error, BlockId, Reason}, Data) ->
     end;
 updating(internal, bootstrap, Data) ->
     case bootstrap_object(Data) of
-        {ok, Data2} -> {keep_state, Data2, []};
-        {done, Data2} ->
-            {next_state, ready, Data2, []};
-        {error, Reason, Data2} ->
-            ?LOG_ERROR("Update aborted due to error ~p", [Reason]),
-            {next_state, ready, Data2, []}
+        {ok, Data2} -> {keep_state, Data2, []}
     end;
 updating(EventType, Event, Data) ->
     handle_event(EventType, Event, updating, Data).
@@ -413,7 +407,7 @@ got_loader_done(#data{update = #update{pending = Map} = Up} = Data, BlockId) ->
     end.
 
 got_loader_failed(#data{update = Up} = Data, BlockId, Reason) ->
-    ?LOG_DEBUG("Block ~b loading failed: ~p", [Reason]),
+    ?LOG_DEBUG("Block ~b loading failed: ~p", [BlockId, Reason]),
     #update{url = Url, pending = Map} = Up,
     case maps:find(BlockId, Map) of
         error ->
@@ -434,7 +428,7 @@ got_loader_failed(#data{update = Up} = Data, BlockId, Reason) ->
     end.
 
 got_loader_error(#data{update = #update{pending = Map}} = Data, BlockId, Reason) ->
-    ?LOG_DEBUG("Block ~b loading failed: ~p", [Reason]),
+    ?LOG_DEBUG("Block ~b loading failed: ~p", [BlockId, Reason]),
     case maps:find(BlockId, Map) of
         error ->
             ?LOG_WARNING("Received loader error for unknown block ~w",

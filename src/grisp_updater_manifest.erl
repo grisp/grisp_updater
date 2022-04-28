@@ -75,6 +75,8 @@ parse_structure({vfat, [_|_] = Def}, Stack, Opts) ->
         sector_size = get_reqint(Def, Stack2, sector_size),
         partitions = Partitions
     };
+parse_structure(undefined, _Stack, _Opts) ->
+    undefined;
 parse_structure({T, _}, Stack, _Opts) ->
     throw({bad_manifest, {bad_structure_type, lists:reverse(Stack), T}});
 parse_structure(_, Stack, _Opts) ->

@@ -63,7 +63,7 @@
 
 %--- Macros --------------------------------------------------------------------
 
--define(DEFAULT_CONCURRENCY, 3).
+-define(DEFAULT_CONCURRENCY, 1).
 
 
 %--- API Functions -------------------------------------------------------------
@@ -148,9 +148,9 @@ do_schedule(#state{pending = PendMap, schedule = Sched} = State,
     Sched2 = queue:in(Id, Sched),
     start_streams(State#state{pending = PendMap2, schedule = Sched2}).
 
-start_streams(#state{concurrency = Concurrency, streams = Streams,
+start_streams(#state{concurrency = Concurrency, streams = StreamMap,
                      schedule = Sched} = State) ->
-    case maps:size(Streams) < Concurrency of
+    case maps:size(StreamMap) < Concurrency of
         false -> State;
         true ->
             case queue:out(Sched) of
@@ -166,6 +166,7 @@ start_stream(#state{pending = PendMap, streams = StreamMap} = State, Id) ->
     #{Id := #pending{url = Url, block = Block} = Pending} = PendMap,
     #block{block_path = Path} = Block,
     ?LOG_DEBUG("Start streaming block ~b from ~s/~s", [Id, Url, Path]),
+
     case grisp_updater_source:stream(Url, Path, ?MODULE, Id) of
         {error, Reason} ->
             grisp_updater_manager:loader_failed(Id, Reason),

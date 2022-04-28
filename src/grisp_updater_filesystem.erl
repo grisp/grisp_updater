@@ -34,7 +34,6 @@ storage_open(_State, Device) ->
     {error, {invalid_device, Device}}.
 
 storage_write(State, Descriptor, Offset, Data) ->
-    ?LOG_DEBUG("Writing ~b bytes at ~b", [iolist_size(Data), Offset]),
     case file:pwrite(Descriptor, Offset, Data) of
         ok -> {ok, State};
         {error, _Reason} = Error -> Error

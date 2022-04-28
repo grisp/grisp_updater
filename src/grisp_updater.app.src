@@ -5,7 +5,8 @@
   {mod, {grisp_updater_app, []}},
   {applications,
    [kernel,
-    stdlib
+    stdlib,
+    gun
    ]},
   {env,[]},
   {modules, []},

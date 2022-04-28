@@ -29,27 +29,33 @@ init([]) ->
         undefined -> {grisp_updater_filesystem, #{}};
         {ok, {M2, A2} = V2} when is_atom(M2), is_map(A2) -> V2
     end,
-    SourceOpts = case application:get_env(grisp_updater, source) of
-        undefined -> {grisp_updater_tarball, #{}};
-        {ok, {M3, A3} = V3} when is_atom(M3), is_map(A3) -> V3
+    SourceOpts = case application:get_env(grisp_updater, sources) of
+        undefined -> [{grisp_updater_tarball, #{}}];
+        {ok, V3} when is_list(V3) -> V3
+    end,
+    LoaderOpts = case application:get_env(grisp_updater, loader) of
+        undefined -> #{};
+        {ok, V4} when is_map(V4) -> V4
+    end,
+    CheckerOpts = case application:get_env(grisp_updater, checker) of
+        undefined -> #{};
+        {ok, V5} when is_map(V5) -> V5
     end,
     {ok, {#{
             strategy => one_for_all
         }, [
             #{id => grisp_updater_source,
               start => {grisp_updater_source, start_link, [#{
-                            backend => SourceOpts
+                            backends => SourceOpts
               }]}},
             #{id => grisp_updater_storage,
               start => {grisp_updater_storage, start_link, [#{
                             backend => StorageOpts
               }]}},
             #{id => grisp_updater_checker,
-              start => {grisp_updater_checker, start_link, [#{
-              }]}},
+              start => {grisp_updater_checker, start_link, [CheckerOpts]}},
             #{id => grisp_updater_loader,
-              start => {grisp_updater_loader, start_link, [#{
-              }]}},
+              start => {grisp_updater_loader, start_link, [LoaderOpts]}},
             #{id => grisp_updater_manager,
               start => {grisp_updater_manager, start_link, [#{
                             system => SystemOpts

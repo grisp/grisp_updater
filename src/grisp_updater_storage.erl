@@ -20,7 +20,7 @@
 -callback storage_read(State :: term(), Descriptor :: term(),
                Offset :: non_neg_integer(), Size :: non_neg_integer()) ->
     {ok, Data :: binary(), State :: term()} | {error, term()}.
--callback storage_close(State :: term(), Descriptor :: binary()) ->
+-callback storage_close(State :: term(), Descriptor :: term()) ->
     {ok, State :: term()}.
 -callback storage_terminate(State :: term(), Reason :: term()) ->
     ok.
@@ -45,7 +45,7 @@
 %--- Records -------------------------------------------------------------------
 
 -record(state, {
-    storage :: {module(), term()}
+    storage :: undefined | {module(), term()}
 }).
 
 
@@ -121,7 +121,7 @@ do_digest(State, crc32, Device, Offset, Size) ->
                       Offset, Size, ?DIGEST_BLOCK_SIZE, 0)
     end;
 do_digest(State, T, Device, Offset, Size)
-  when T =:= sha256, T =:= sha384, T =:= sha512 ->
+  when T =:= sha256; T =:= sha384; T =:= sha512 ->
     UpdateFun = fun crypto:hash_update/2,
     FinalFun = fun crypto:hash_final/1,
     case storage_open(State, Device) of

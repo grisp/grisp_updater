@@ -80,7 +80,7 @@ handle_cast({schedule, #block{id = Id} = Block, Target, Offset},
     Check = #check{block = Block, target = Target, offset = Offset},
     case maps:find(Id, M) of
         {ok, _} ->
-            grisp_updater_manager:check_error(Id, already_scheduled),
+            grisp_updater_manager:checker_error(Id, already_scheduled),
             {noreply, State, timeout(State)};
         error ->
             M2 = M#{Id => Check},

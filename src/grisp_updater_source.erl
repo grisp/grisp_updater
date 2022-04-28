@@ -13,25 +13,28 @@
 -callback source_init(Opts :: map()) ->
     {ok, State :: term()} | {error, term()}.
 -callback source_open(State :: term(), Url :: binary(), Opts :: map()) ->
-    {ok, SessRef :: reference(), State :: term()} | {error, term()}.
--callback source_stream(State :: term(), SessRef :: reference(),
+    {ok, SourceRef :: term(), State :: term()} | not_supported | {error, term()}.
+-callback source_stream(State :: term(), SourceRef :: term(),
                         Path :: binary(), Opts :: map()) ->
-    {stream, StreamRef :: reference(), State :: term()}
+    {stream, StreamRef :: term(), State :: term()}
   | {data, Data :: binary(), State :: term()}
   | {error, term()}.
--callback source_cancel(State :: term(), StreamRef :: reference()) ->
+-callback source_cancel(State :: term(), SourceRef :: term(), StreamRef :: term()) ->
     State :: term().
 -callback source_handle(State :: term(), Msg :: term()) ->
     pass
   | {ok, State :: term}
-  | {data, StreamRef :: reference(), Data :: binary(), State :: term()}
-  | {done, StreamRef :: reference(), Data :: binary(), State :: term()}
-  | {stream_error, StreamRef :: reference(), Reason :: term()}
-  | {session_error, SessRef :: reference(), Reason :: term()}.
--callback source_close(State :: term(), SessRef :: reference()) ->
+  | {data, StreamRef :: term(), Data :: binary(), State :: term()}
+  | {done, StreamRef :: term(), Data :: binary(), State :: term()}
+  | {stream_error, [StreamRef :: term()], Reason :: term(), State :: term()}
+  | {source_error, SourceRef :: term(), Reason :: term(), State :: term()}.
+-callback source_close(State :: term(), SourceRef :: term()) ->
     State :: term().
 -callback source_terminate(State :: term(), Reason :: term()) ->
     ok.
+
+-optional_callbacks([source_handle/2]).
+
 
 
 %--- Exports -------------------------------------------------------------------
@@ -52,29 +55,37 @@
 
 %--- Records -------------------------------------------------------------------
 
--record(sess, {
+-record(source, {
+    source :: term(),
+    backend :: term(),
     url :: binary(),
-    refcount = 1 :: non_neg_integer()
+    refcount = 1 :: non_neg_integer(),
+    tref :: undefined | reference()
 }).
 
 -record(load, {
-    sess :: reference(),
+    source :: term(),
     from :: term(),
     data :: iolist()
 }).
 
 -record(stream, {
-    sess :: reference(),
+    source :: reference(),
     mod :: module(),
     params :: term()
 }).
 
 -record(state, {
-    source :: {module(), term()},
+    backends :: undefined | #{term() => {module(), term()}},
     urls = #{} :: #{binary() => reference()},
-    sessions = #{} :: #{reference() => #sess{}},
-    streams = #{} :: #{reference() => #load{} | #stream{}}
+    sources = #{} :: #{term() => #source{}},
+    streams = #{} :: #{term() => #load{} | #stream{}}
 }).
+
+
+%--- Macros --------------------------------------------------------------------
+
+-define(SOURCE_CLOSE_DELAY, 1000).
 
 
 %--- API Functions -------------------------------------------------------------
@@ -94,9 +105,9 @@ cancel(StreamRef) ->
 
 %--- Callbacks -----------------------------------------------------------------
 
-init(#{backend := Backend})  ->
+init(#{backends := Backends})  ->
     ?LOG_INFO("Starting update source...", []),
-    source_init(#state{}, Backend).
+    source_init(#state{}, Backends).
 
 handle_call({load, Url, Path}, From, State) ->
     case start_loading(State, Url, Path, From) of
@@ -118,25 +129,32 @@ handle_cast(Request, State) ->
     ?LOG_WARNING("Unexpected cast: ~p", [Request]),
     {noreply, State}.
 
+handle_info({delayed_close_source, SourceRef, MinRefCount}, State) ->
+    {noreply, delayed_close_source(State, SourceRef, MinRefCount)};
 handle_info(Info, State) ->
     case handle_message(State, Info) of
-        {ok, State2} -> {noreply, State2};
+        {ok, State2} ->
+            {noreply, State2};
         pass ->
             ?LOG_WARNING("Unexpected messagge: ~p", [Info]),
             {noreply, State}
     end.
 
-terminate(Reason, #state{sessions = Sessions, streams = Streams} = State) ->
+terminate(Reason, #state{backends = Backends, sources = Sources,
+                         streams = Streams} = State) ->
     lists:foreach(fun
         ({_, #load{from = From}}) ->
             gen_server:reply(From, {error, Reason});
         ({StreamRef, #stream{mod = SinkMod, params = SinkParams}}) ->
             SinkMod:sink_error(StreamRef, SinkParams, Reason)
     end, maps:to_list(Streams)),
-    State2 = lists:foldl(fun(SessRef, S) ->
-        source_close(S, SessRef)
-    end, State, maps:keys(Sessions)),
-    source_terminate(State2, Reason),
+    State2 = lists:foldl(
+        fun(#source{source = SourceRef, backend = BackendRef}, S) ->
+            source_close(S, BackendRef, SourceRef)
+        end, State, maps:values(Sources)),
+    lists:foreach(fun(BackendRef) ->
+        source_terminate(State2, BackendRef, Reason)
+    end, maps:keys(Backends)),
     ok.
 
 
@@ -146,16 +164,16 @@ start_loading(State, Url, Path, From) ->
     case get_session(State, Url) of
         {error, Reason} ->
             {error, Reason, State};
-        {ok, SessRef, State2} ->
-            case source_stream(State2, SessRef, Path, #{}) of
+        {ok, BackendRef, SourceRef, State2} ->
+            case source_stream(State2, BackendRef, SourceRef, Path, #{}) of
                 {error, Reason} ->
-                    {error, Reason, del_session_if(State2, SessRef, 1)};
+                    {error, Reason, decref_source(State2, SourceRef, 1)};
                 {data, Data, State3} ->
                     gen_server:reply(From, {ok, Data}),
-                    {ok, del_session_if(State3, SessRef, 1)};
+                    {ok, decref_source(State3, SourceRef, 1)};
                 {stream, StreamRef, State3} ->
-                    Load = #load{sess = SessRef, from = From, data = []},
-                    {ok, add_stream(State3, SessRef, StreamRef, Load)}
+                    Load = #load{source = SourceRef, from = From, data = []},
+                    {ok, add_stream(State3, SourceRef, StreamRef, Load)}
             end
     end.
 
@@ -163,40 +181,44 @@ start_streaming(State, Url, Path, SinkMod, SinkParams) ->
     case get_session(State, Url) of
         {error, Reason} ->
             {error, Reason, State};
-        {ok, SessRef, State2} ->
-            case source_stream(State2, SessRef, Path, #{}) of
+        {ok, BackendRef, SourceRef, State2} ->
+            case source_stream(State2, BackendRef, SourceRef, Path, #{}) of
                 {error, Reason} ->
-                    {error, Reason, del_session_if(State2, SessRef, 1)};
+                    {error, Reason, decref_source(State2, SourceRef, 1)};
                 {data, Data, State3} ->
-                    TempRef = make_ref(),
-                    SinkMod:sink_done(TempRef, SinkParams, Data),
-                    {ok, TempRef, State3};
+                    TempStreamRef = make_ref(),
+                    SinkMod:sink_done(TempStreamRef, SinkParams, Data),
+                    {ok, TempStreamRef, State3};
                 {stream, StreamRef, State3} ->
-                    Stream = #stream{sess = SessRef, mod = SinkMod,
+                    Stream = #stream{source = SourceRef, mod = SinkMod,
                                      params = SinkParams},
-                    State2 = add_stream(State3, SessRef, StreamRef, Stream),
-                    {ok, StreamRef, State2}
+                    State4 = add_stream(State3, SourceRef, StreamRef, Stream),
+                    {ok, StreamRef, State4}
             end
     end.
 
-cancel_stream(#state{streams = StreamMap} = State, StreamRef) ->
+cancel_stream(#state{streams = StreamMap, sources = SourceMap} = State, StreamRef) ->
     case maps:find(StreamRef, StreamMap) of
         error -> State;
-        {ok, #stream{mod = SinkMod, params = SinkParams}} ->
+        {ok, #stream{source = SourceRef, mod = SinkMod, params = SinkParams}} ->
+            #{SourceRef := #source{backend = BackendRef}} = SourceMap,
             SinkMod:sink_error(StreamRef, SinkParams, cancelled),
-            del_stream(source_cancel(State, StreamRef), StreamRef)
+            del_stream(source_cancel(State, BackendRef, SourceRef, StreamRef), StreamRef)
     end.
 
 handle_message(#state{streams = StreamMap} = State, Msg) ->
     case source_handle(State, Msg) of
         pass -> pass;
         {ok, _State2} = Result -> Result;
-        {stream_error, StreamRef, Reason} ->
-            notify_stream_error(State, StreamRef, Reason),
-            {ok, del_stream(State, StreamRef)};
-        {session_error, SessRef, Reason} ->
-            notify_session_error(State, SessRef, Reason),
-            {ok, del_session(State, SessRef)};
+        {stream_error, StreamRefs, Reason, State2} ->
+            State3 = lists:foldl(fun(StreamRef, S) ->
+                notify_stream_error(S, StreamRef, Reason),
+                del_stream(S, StreamRef)
+            end, State2, StreamRefs),
+            {ok, State3};
+        {source_error, SourceRef, Reason, State2} ->
+            notify_source_error(State2, SourceRef, Reason),
+            {ok, del_source(State2, SourceRef)};
         {data, StreamRef, Data, State2} ->
             case maps:find(StreamRef, StreamMap) of
                 error ->
@@ -231,19 +253,19 @@ handle_message(#state{streams = StreamMap} = State, Msg) ->
             end
     end.
 
-notify_session_error(#state{sessions = SessMap, streams = StreamMap},
-                     SessRef, Reason) ->
-    case maps:find(SessRef, SessMap) of
+notify_source_error(#state{sources = SourceMap, streams = StreamMap},
+                     SourceRef, Reason) ->
+    case maps:find(SourceRef, SourceMap) of
         error ->
-            ?LOG_WARNING("Error for unknown session ~w: ~p",
-                         [SessRef, Reason]),
+            ?LOG_WARNING("Error for unknown source ~w: ~p",
+                         [SourceRef, Reason]),
             ok;
-        {ok, #sess{}} ->
+        {ok, #source{}} ->
             lists:foreach(fun
-                ({_, #load{sess = S, from = From}}) when S =:= SessRef ->
+                ({_, #load{source = S, from = From}}) when S =:= SourceRef ->
                     gen_server:reply(From, {error, Reason});
-                ({StreamRef, #stream{sess = S, mod = SinkMod, params = SinkParams}})
-                  when S =:= SessRef ->
+                ({StreamRef, #stream{source = S, mod = SinkMod, params = SinkParams}})
+                  when S =:= SourceRef ->
                     SinkMod:sink_error(StreamRef, SinkParams, Reason)
             end, maps:to_list(StreamMap))
     end.
@@ -259,112 +281,225 @@ notify_stream_error(#state{streams = StreamMap}, StreamRef, Reason) ->
             SinkMod:sink_error(StreamRef, SinkParams, Reason)
     end.
 
-get_session(#state{urls = UrlMap, sessions = SessMap} = State, Url) ->
+get_session(#state{urls = UrlMap, sources = SourceMap} = State, Url) ->
     case maps:find(Url, UrlMap) of
-        {ok, SessRef} ->
-            {ok, SessRef, State};
+        {ok, SourceRef} ->
+            #{SourceRef := #source{backend = BackendRef}} = SourceMap,
+            {ok, BackendRef, SourceRef, State};
         error ->
             case source_open(State, Url, #{}) of
                 {error, _Reason} = Error -> Error;
-                {ok, SessRef, State2} ->
-                    Sess = #sess{url = Url, refcount = 0},
-                    SessMap2 = SessMap#{SessRef => Sess},
-                    UrlMap2 = UrlMap#{Url => SessRef},
-                    State3 = State2#state{urls = UrlMap2, sessions = SessMap2},
-                    {ok, SessRef, State3}
+                {ok, BackendRef, SourceRef, State2} ->
+                    Source = #source{
+                        backend = BackendRef,
+                        source = SourceRef,
+                        url = Url,
+                        refcount = 0
+                    },
+                    SourceMap2 = SourceMap#{SourceRef => Source},
+                    UrlMap2 = UrlMap#{Url => SourceRef},
+                    State3 = State2#state{urls = UrlMap2, sources = SourceMap2},
+                    {ok, BackendRef, SourceRef, State3}
             end
     end.
 
-del_session(#state{streams = StreamMap} = State, SessRef) ->
+del_source(#state{streams = StreamMap} = State, SourceRef) ->
     Refs = lists:foldl(fun
-        ({X, #load{sess = R}}, Acc) when R =:= SessRef -> [X | Acc];
-        ({X, #stream{sess = R}}, Acc) when R =:= SessRef -> [X | Acc]
+        ({X, #load{source = R}}, Acc) when R =:= SourceRef -> [X | Acc];
+        ({X, #stream{source = R}}, Acc) when R =:= SourceRef -> [X | Acc]
     end, [], maps:to_list(StreamMap)),
     State2 = lists:foldl(fun(StreamRef, S) ->
-            del_stream(S, StreamRef)
-        end, State, Refs),
+        del_stream(S, StreamRef)
+    end, State, Refs),
     % Ensure the session is closed even if something went wrong between
     % a session is opened and a stream is started
-    del_session_if(State2, SessRef, infinity).
+    force_close_source(State2, SourceRef).
 
 % Remove a session if the refcount is smaller or equal to given count
-del_session_if(#state{urls = UrlMap, sessions = SessMap} = State,
-               SessRef, MinRefCount) ->
-    case maps:find(SessRef, SessMap) of
+decref_source(#state{sources = SourceMap} = State,
+                   SourceRef, MinRefCount) ->
+    case maps:find(SourceRef, SourceMap) of
         error -> State;
-        {ok, #sess{url = Url, refcount = RefCount}}
-          when MinRefCount =:= infinity; RefCount =< MinRefCount ->
-            State2 = source_close(State, SessRef),
-            SessMap2 = maps:remove(SessRef, SessMap),
-            UrlMap2 = maps:remove(Url, UrlMap),
-            State2#state{urls = UrlMap2, sessions = SessMap2}
+        {ok, #source{refcount = RefCount} = Source} ->
+            Source2 = Source#source{refcount = RefCount - 1},
+            Source3 = if
+                MinRefCount =:= infinity ->
+                    schedule_close_source(Source2, infinity);
+                RefCount =< MinRefCount ->
+                    schedule_close_source(Source2, MinRefCount - 1);
+                true ->
+                    Source2
+            end,
+            SourceMap2 = SourceMap#{SourceRef := Source3},
+            State#state{sources = SourceMap2}
     end.
 
-add_stream(#state{sessions = SessMap, streams = StreamMap} = State,
-           SessRef, StreamRef, StreamData) ->
-    #sess{refcount = RefCount} = Sess = maps:get(SessRef, SessMap),
+schedule_close_source(#source{tref = undefined, source = SourceRef} = Source,
+                      MinRefCount) ->
+    TRef = erlang:send_after(?SOURCE_CLOSE_DELAY, self(),
+                             {delayed_close_source, SourceRef, MinRefCount}),
+    Source#source{tref = TRef};
+schedule_close_source(#source{tref = TRef} = Source, MinRefCount) ->
+    erlang:cancel_timer(TRef),
+    schedule_close_source(Source#source{tref = undefined}, MinRefCount).
+
+delayed_close_source(#state{sources = SourceMap} = State,
+                     SourceRef, MinRefCount) ->
+    case maps:find(SourceRef, SourceMap) of
+        error -> State;
+        {ok, #source{refcount = RefCount} = Source}
+          when MinRefCount =:= infinity; RefCount =< MinRefCount ->
+            force_close_source(State, Source#source{tref = undefined});
+        {ok, #source{} = Source} ->
+            Source2 = Source#source{tref = undefined},
+            SourceMap2 = SourceMap#{SourceRef := Source2},
+            State#state{sources = SourceMap2}
+    end.
+
+force_close_source(#state{urls = UrlMap, sources = SourceMap} = State,
+                   #source{source = SourceRef, backend = BackendRef,
+                           url = Url, tref = TRef}) ->
+    if TRef =/= undefined -> erlang:cancel_timer(TRef); true -> ok end,
+    State2 = source_close(State, BackendRef, SourceRef),
+    SourceMap2 = maps:remove(SourceRef, SourceMap),
+    UrlMap2 = maps:remove(Url, UrlMap),
+    State2#state{urls = UrlMap2, sources = SourceMap2};
+force_close_source(#state{sources = SourceMap} = State,
+                   SourceRef) ->
+    case maps:find(SourceRef, SourceMap) of
+        error -> State;
+        {ok, Source} -> force_close_source(State, Source)
+    end.
+
+add_stream(#state{sources = SourceMap, streams = StreamMap} = State,
+           SourceRef, StreamRef, StreamData) ->
+    #source{refcount = RefCount} = Source = maps:get(SourceRef, SourceMap),
     error = maps:find(StreamRef, StreamMap),
     StreamMap2 = StreamMap#{StreamRef => StreamData},
-    Sess2 = Sess#sess{refcount = RefCount + 1},
-    SessMap2 = SessMap#{SessRef => Sess2},
-    State#state{sessions = SessMap2, streams = StreamMap2}.
+    Source2 = Source#source{refcount = RefCount + 1},
+    SourceMap2 = SourceMap#{SourceRef => Source2},
+    State#state{sources = SourceMap2, streams = StreamMap2}.
 
 del_stream(#state{streams = StreamMap} = State, StreamRef) ->
     case maps:take(StreamRef, StreamMap) of
         error -> State;
-        {#load{sess = R}, M} -> del_session_if(State#state{streams = M}, R, 1);
-        {#stream{sess = R}, M} -> del_session_if(State#state{streams = M}, R, 1)
+        {#load{source = R}, M} ->
+            decref_source(State#state{streams = M}, R, 1);
+        {#stream{source = R}, M} ->
+            decref_source(State#state{streams = M}, R, 1)
     end.
 
 
 %--- Source Handling Functions
 
-source_init(#state{source = undefined} = State, {Mod, Opts})
-  when is_atom(Mod), is_map(Opts) ->
-    case Mod:source_init(Opts) of
+source_init(#state{backends = undefined} = State, BackendSpecs) ->
+    case source_init_loop(BackendSpecs, []) of
         {error, _Reason} = Error -> Error;
-        {ok, Sub} -> {ok, State#state{source = {Mod, Sub}}}
-    end;
-source_init(#state{source = undefined}, _Any) ->
-    {error, bad_backend}.
-
-source_open(#state{source = {Mod, Sub}} = State, Url, Opts) ->
-    case Mod:source_open(Sub, Url, Opts) of
-        {error, _Reason} = Error -> Error;
-        {ok, SessRef, Sub2} -> {ok, SessRef, State#state{source = {Mod, Sub2}}}
+        {ok, Backends} ->
+            {ok, State#state{backends = maps:from_list(Backends)}}
     end.
 
-source_stream(#state{source = {Mod, Sub}} = State, SessRef, Path, Opts) ->
-    case Mod:source_stream(Sub, SessRef, Path, Opts) of
+source_init_loop([], Backends) ->
+    {ok, lists:reverse(Backends)};
+source_init_loop([{Mod, Opts} | Rest], Backends)
+  when is_atom(Mod), is_map(Opts) ->
+    case Mod:source_init(Opts) of
+        {ok, Sub} ->
+            source_init_loop(Rest, [{make_ref(), {Mod, Sub}} | Backends]);
+        {error, Reason} = Error ->
+            lists:foreach(fun({_, {M, S}}) ->
+                M:source_terminate(S, Reason)
+            end, Backends),
+            Error
+    end;
+source_init_loop([BackendSpec | _], Backends) ->
+    Reason = {bad_backend, BackendSpec},
+    lists:foreach(fun({_, {M, S}}) ->
+        M:source_terminate(S, Reason)
+    end, Backends),
+    {error, Reason}.
+
+source_open(#state{backends = Backends} = State, Url, Opts) ->
+    case source_open_loop(maps:keys(Backends), Backends, Url, Opts) of
+        not_supported -> {error, not_supported};
+        {error, _Reason} = Error -> Error;
+        {ok, BackendRef, SourceRef, Backends2} ->
+            {ok, BackendRef, SourceRef, State#state{backends = Backends2}}
+    end.
+
+source_open_loop([], _Backends, _Url, _Opts) ->
+    not_supported;
+source_open_loop([Ref | Rest], Backends, Url, Opts) ->
+    #{Ref := {Mod, Sub}} = Backends,
+    case Mod:source_open(Sub, Url, Opts) of
+        not_supported -> source_open_loop(Rest, Backends, Url, Opts);
+        {error, _Reason} = Error -> Error;
+        {ok, SourceRef, Sub2} ->
+            {ok, Ref, SourceRef, Backends#{Ref := {Mod, Sub2}}}
+    end.
+
+source_stream(#state{backends = Backends} = State,
+              BackendRef, SourceRef, Path, Opts) ->
+    #{BackendRef := {Mod, Sub}} = Backends,
+    case Mod:source_stream(Sub, SourceRef, Path, Opts) of
         {error, Reason} ->
             {error, Reason};
         {data, Data, Sub2} ->
-            {data, Data, State#state{source = {Mod, Sub2}}};
+            State2 = State#state{backends = Backends#{BackendRef := {Mod, Sub2}}},
+            {data, Data, State2};
         {stream, StreamRef, Sub2} ->
-            {stream, StreamRef, State#state{source = {Mod, Sub2}}}
+            State2 = State#state{backends = Backends#{BackendRef := {Mod, Sub2}}},
+            {stream, StreamRef, State2}
     end.
 
-source_cancel(#state{source = {Mod, Sub}} = State, StreamRef) ->
-    State#state{source = {Mod, Mod:source_cancel(Sub, StreamRef)}}.
+source_cancel(#state{backends = Backends} = State,
+              BackendRef, SourceRef, StreamRef) ->
+    #{BackendRef := {Mod, Sub}} = Backends,
+    Sub2 = Mod:source_cancel(Sub, SourceRef, StreamRef),
+    State#state{backends = Backends#{BackendRef := {Mod, Sub2}}}.
 
-source_handle(#state{source = {Mod, Sub}} = State, Msg) ->
-    case Mod:source_handle(Sub, Msg) of
+source_handle(#state{backends = Backends} = State, Msg) ->
+    case source_handle_loop(maps:keys(Backends), Backends, Msg) of
+        pass -> pass;
+        {ok, Backends2} ->
+            {ok, State#state{backends = Backends2}};
+        {stream_error, StreamRefs, Reason, Backends2} ->
+            {stream_error, StreamRefs, Reason, State#state{backends = Backends2}};
+        {source_error, SourceRef, Reason, Backends2} ->
+            {source_error, SourceRef, Reason, State#state{backends = Backends2}};
+        {data, StreamRef, Data, Backends2} ->
+            {data, StreamRef, Data, State#state{backends = Backends2}};
+        {done, StreamRef, Data, Backends2} ->
+            {done, StreamRef, Data, State#state{backends = Backends2}}
+    end.
+
+source_handle_loop([], _Backends, _Msg) ->
+    pass;
+source_handle_loop([Ref | Rest], Backends, Msg) ->
+    #{Ref := {Mod, Sub}} = Backends,
+    try Mod:source_handle(Sub, Msg) of
         pass ->
-            pass;
+            source_handle_loop(Rest, Backends, Msg);
         {ok, Sub2} ->
-            {ok, State#state{source = {Mod, Sub2}}};
-        {stream_error, _StreamRef, _Reason} = Error ->
-            Error;
-        {session_error, _SessRef, _Reason} = Error ->
-            Error;
+            {ok, Backends#{Ref := {Mod, Sub2}}};
+        {stream_error, StreamRefs, Reason, Sub2} ->
+            {stream_error, StreamRefs, Reason, Backends#{Ref := {Mod, Sub2}}};
+        {source_error, SourceRef, Reason, Sub2} ->
+            {source_error, SourceRef, Reason, Backends#{Ref := {Mod, Sub2}}};
         {data, StreamRef, Data, Sub2} ->
-            {data, StreamRef, Data, State#state{source = {Mod, Sub2}}};
+            {data, StreamRef, Data, Backends#{Ref := {Mod, Sub2}}};
         {done, StreamRef, Data, Sub2} ->
-            {done, StreamRef, Data, State#state{source = {Mod, Sub2}}}
+            {done, StreamRef, Data, Backends#{Ref := {Mod, Sub2}}}
+    catch
+        error:undef ->
+            source_handle_loop(Rest, Backends, Msg)
     end.
 
-source_close(#state{source = {Mod, Sub}} = State, SessRef) ->
-    State#state{source = {Mod, Mod:source_close(Sub, SessRef)}}.
+source_close(#state{backends = Backends} = State, BackendRef, SourceRef) ->
+    #{BackendRef := {Mod, Sub}} = Backends,
+    Sub2 = Mod:source_close(Sub, SourceRef),
+    State#state{backends = Backends#{BackendRef := {Mod, Sub2}}}.
 
-source_terminate(#state{source = {Mod, Sub}}, Reason) ->
+source_terminate(#state{backends = Backends}, BackendRef, Reason) ->
+    #{BackendRef := {Mod, Sub}} = Backends,
     Mod:source_terminate(Sub, Reason).

@@ -38,7 +38,7 @@
 system_init(Opts) ->
     ?LOG_INFO("Initializing dummy update system interface", []),
     DeviceFile = case maps:find(device_file, Opts) of
-        {ok, F} when is_list(F), is_binary(F) -> F;
+        {ok, F} when is_list(F); is_binary(F) -> F;
         error ->
             {ok, CurrDir} = file:get_cwd(),
             filename:join(CurrDir, ?DEFAULT_DEVICE)
