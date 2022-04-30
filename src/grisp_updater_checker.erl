@@ -131,6 +131,12 @@ do_check(State, Check) ->
     Offset = DeviceOffset + TargetOffset + DataOffset,
     %TODO: Mabe do some boundary checks ?
     case grisp_updater_storage:digest(crc32, Device, Offset, DataSize) of
+        {error, eof} ->
+            % Needed to check files that may be smaller than they updated version
+            %TODO: Maybe only allow that for regular files, not for devices
+            ?LOG_DEBUG("Block ~b check error: eof", [Id]),
+            grisp_updater_manager:checker_done(Id, false),
+            State;
         {error, Reason} ->
             ?LOG_DEBUG("Block ~b check error: ~w", [Id, Reason]),
             grisp_updater_manager:checker_error(Id, Reason),

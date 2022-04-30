@@ -171,7 +171,8 @@ updating(cast, {checker_error, BlockId, Reason}, Data) ->
 updating(cast, {loader_done, BlockId}, Data) ->
     case got_loader_done(Data, BlockId) of
         {ok, Data2} -> {keep_state, Data2};
-        {done, Data2} -> {next_state, ready, Data2}
+        {done, Data2} -> {next_state, ready, Data2};
+        {error, _Reason} -> {next_state, ready, Data}
     end;
 updating(cast, {loader_failed, BlockId, Reason}, Data) ->
     case got_loader_failed(Data, BlockId, Reason) of
@@ -184,7 +185,8 @@ updating(cast, {loader_error, BlockId, Reason}, Data) ->
     end;
 updating(internal, bootstrap, Data) ->
     case bootstrap_object(Data) of
-        {ok, Data2} -> {keep_state, Data2, []}
+        {ok, Data2} -> {keep_state, Data2, []};
+        {error, _Reason} -> {next_state, ready, Data}
     end;
 updating(EventType, Event, Data) ->
     handle_event(EventType, Event, updating, Data).
@@ -272,20 +274,44 @@ select_update_target(Data, Manifest) ->
             select_next_system(Data, CurrSysId, Manifest)
     end.
 
+%TODO: Factorize this code
 select_next_system(Data, CurrSysId,
-                   #manifest{structure = #vfat{} = Structure}) ->
-    #vfat{sector_size = SecSize, partitions = Partitions} = Structure,
-    case lists_keysplit(CurrSysId, #vfat_partition.id, Partitions) of
+                   #manifest{structure = #mbr{} = Structure}) ->
+    #mbr{sector_size = SecSize, partitions = Partitions} = Structure,
+    case lists_keysplit(CurrSysId, #mbr_partition.id, Partitions) of
         not_found ->
-            ?LOG_ERROR("Current system ~w not found in update package structure",
+            ?LOG_ERROR("Current system ~w not found in update package MBR structure",
                        [CurrSysId]),
             {error, current_system_partition_not_found};
         {H, T} ->
             case first_system_partition(T ++ H) of
                 not_found ->
-                    ?LOG_ERROR("No appropriate system partition found in update package structure", []),
+                    ?LOG_ERROR("No appropriate system partition found in update package MBR structure", []),
                     {error, update_system_partition_not_found};
-                #vfat_partition{id = Id, start = Start, size = Size} ->
+                #mbr_partition{id = Id, start = Start, size = Size} ->
+                    DeviceFile = system_device(Data),
+                    Device = #target{
+                        device = DeviceFile,
+                        offset = Start * SecSize,
+                        size = Size * SecSize
+                    },
+                    {ok, Id, Device}
+            end
+    end;
+select_next_system(Data, CurrSysId,
+                   #manifest{structure = #gpt{} = Structure}) ->
+    #gpt{sector_size = SecSize, partitions = Partitions} = Structure,
+    case lists_keysplit(CurrSysId, #gpt_partition.id, Partitions) of
+        not_found ->
+            ?LOG_ERROR("Current system ~w not found in update package GPT structure",
+                       [CurrSysId]),
+            {error, current_system_partition_not_found};
+        {H, T} ->
+            case first_system_partition(T ++ H) of
+                not_found ->
+                    ?LOG_ERROR("No appropriate system partition found in update package GPT structure", []),
+                    {error, update_system_partition_not_found};
+                #gpt_partition{id = Id, start = Start, size = Size} ->
                     DeviceFile = system_device(Data),
                     Device = #target{
                         device = DeviceFile,
@@ -297,22 +323,39 @@ select_next_system(Data, CurrSysId,
     end.
 
 first_system_partition([]) -> not_found;
-first_system_partition([#vfat_partition{role = system, id = Id} = Part | _])
+first_system_partition([#mbr_partition{role = system, id = Id} = Part | _])
+  when Id =/= undefined ->
+    Part;
+first_system_partition([#gpt_partition{role = system, id = Id} = Part | _])
   when Id =/= undefined ->
     Part;
 first_system_partition([_ | Rest]) ->
     first_system_partition(Rest).
 
 bootstrap_object(#data{update = #update{objects = [Obj | _],
+                                        system_id = SysId,
                                         pending = undefined} = Up} = Data) ->
     ?LOG_INFO("Starting updating ~s", [object_name(Obj)]),
-    #object{target = #raw{context = Ctx, offset = Off}} = Obj,
-    #update{targets = #{Ctx := Target}} = Up,
+    #object{target = TargetSpec, blocks = Blocks} = Obj,
+    case system_prepare_target(Data, SysId, TargetSpec) of
+        {ok, #raw_target_spec{context = Ctx, offset = ExtraOffset}} ->
+            #update{targets = #{Ctx := Target}} = Up,
+            bootstrap_object(Data, Up, Target, ExtraOffset, Blocks);
+        {ok, #file_target_spec{path = Path}} ->
+            Target = #target{device = Path, offset = 0},
+            bootstrap_object(Data, Up, Target, 0, Blocks);
+        {error, Reason} = Error ->
+            ?LOG_ERROR("Error while preparing target ~p for system ~b: ~p",
+                       [TargetSpec, SysId, Reason]),
+            Error
+    end.
+
+bootstrap_object(Data, Up, Target, ExtraOffset, Blocks) ->
     Pending = lists:foldl(fun(#block{id = Id} = B, Map) ->
-        grisp_updater_checker:schedule_check(B, Target, Off),
+        grisp_updater_checker:schedule_check(B, Target, ExtraOffset),
         Map#{Id => #pending{status = checking, block = B,
-                            target = Target, offset = Off}}
-    end, #{}, Obj#object.blocks),
+                            target = Target, offset = ExtraOffset}}
+    end, #{}, Blocks),
     Up2 = Up#update{pending = Pending},
     {ok, Data#data{update = Up2}}.
 
@@ -473,13 +516,17 @@ stats_block_checked(#data{update = #update{stats = Stats} = Up} = Data,
     Data#data{update = Up2}.
 
 stats_block_loaded(#data{update = #update{stats = Stats} = Up} = Data,
-                   #block{data_size = DataSize, block_size = BlockSize}) ->
+                   #block{data_size = DataSize, encoding = Encoding}) ->
     #{blocks_loaded := Bl, blocks_written := Bw,
       data_loaded := Dl, data_written := Dw} = Stats,
+    LoadedSize = case Encoding of
+        #gzip_encoding{block_size = BlockSize} -> BlockSize;
+        #raw_encoding{} -> DataSize
+    end,
     Stats2 = Stats#{
         blocks_loaded := Bl + 1,
         blocks_written := Bw + 1,
-        data_loaded := Dl + BlockSize,
+        data_loaded := Dl + LoadedSize,
         data_written := Dw + DataSize
     },
     Up2 = Up#update{stats = Stats2},
@@ -548,9 +595,19 @@ system_device(#data{system = {Mod, Sub}}) ->
     Mod:system_device(Sub).
 
 system_prepare_update(#data{system = {Mod, Sub}} = Data, SysId) ->
-    case Mod:system_prepare_update(Sub, SysId) of
+    try Mod:system_prepare_update(Sub, SysId) of
         {error, _Reason} = Error -> Error;
         {ok, Sub2} -> {ok, Data#data{system = {Mod, Sub2}}}
+    catch
+        error:undef -> {ok, Data}
+    end.
+
+system_prepare_target(#data{system = {Mod, Sub}}, SysId, Spec) ->
+    try Mod:system_prepare_target(Sub, SysId, Spec) of
+        {error, _Reason} = Error -> Error;
+        {ok, Spec2} -> {ok, Spec2}
+    catch
+        error:undef -> {ok, Spec}
     end.
 
 system_set_updated(#data{system = {Mod, Sub}} = Data, SysId) ->

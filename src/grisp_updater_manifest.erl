@@ -66,12 +66,21 @@ check_format(Props, _Opts) ->
         _ -> throw({bad_manifest, unsupported_format})
     end.
 
-parse_structure({vfat, [_|_] = Def}, Stack, Opts) ->
-    Stack2 = [vfat | Stack],
+parse_structure({mbr, [_|_] = Def}, Stack, Opts) ->
+    Stack2 = [mbr | Stack],
     PartitionDefs = get_reqlist(Def, Stack2, partitions),
-    Partitions = parse_vfat_partitions(PartitionDefs, 0,
-                                       [partitions | Stack2], Opts, []),
-    #vfat{
+    Partitions = parse_mbr_partitions(PartitionDefs, 0,
+                                      [partitions | Stack2], Opts, []),
+    #mbr{
+        sector_size = get_reqint(Def, Stack2, sector_size),
+        partitions = Partitions
+    };
+parse_structure({gpt, [_|_] = Def}, Stack, Opts) ->
+    Stack2 = [gpt | Stack],
+    PartitionDefs = get_reqlist(Def, Stack2, partitions),
+    Partitions = parse_gpt_partitions(PartitionDefs, 0,
+                                      [partitions | Stack2], Opts, []),
+    #gpt{
         sector_size = get_reqint(Def, Stack2, sector_size),
         partitions = Partitions
     };
@@ -82,28 +91,72 @@ parse_structure({T, _}, Stack, _Opts) ->
 parse_structure(_, Stack, _Opts) ->
     throw({bad_manifest, {bad_structure, lists:reverse(Stack)}}).
 
-parse_vfat_partitions([], _I, _Stack, _Opts, Acc) ->
+parse_mbr_partitions([], _I, _Stack, _Opts, Acc) ->
     lists:reverse(Acc);
-parse_vfat_partitions([{Role, Props} | Rem], I, Stack, _Opts, Acc)
-  when Role =:= system; Role =:= data ->
+parse_mbr_partitions([{Role, Props} | Rem], I, Stack, _Opts, Acc)
+  when Role =:= system ->
+    %TODO: Factorize this duplicated code
     Stack2 = [Role, I | Stack],
-    Part = #vfat_partition{
+    Part = #mbr_partition{
         role = Role,
         id = get_reqint(Props, Stack2, id),
         type = get_reqenum(Props, Stack2, type, [dos]),
         start = get_reqint(Props, Stack2, start),
         size = get_reqint(Props, Stack2, size)
     },
-    parse_vfat_partitions(Rem, I + 1, Stack, _Opts, [Part | Acc]);
-parse_vfat_partitions([{Role, _} | _], I, Stack, _Opts, _Acc) ->
+    parse_mbr_partitions(Rem, I + 1, Stack, _Opts, [Part | Acc]);
+parse_mbr_partitions([{Role, Props} | Rem], I, Stack, _Opts, Acc)
+  when Role =:= data; Role =:= boot ->
+    %TODO: Factorize this duplicated code
+    Stack2 = [Role, I | Stack],
+    Part = #mbr_partition{
+        role = Role,
+        type = get_reqenum(Props, Stack2, type, [dos]),
+        start = get_reqint(Props, Stack2, start),
+        size = get_reqint(Props, Stack2, size)
+    },
+    parse_mbr_partitions(Rem, I + 1, Stack, _Opts, [Part | Acc]);
+parse_mbr_partitions([{Role, _} | _], I, Stack, _Opts, _Acc) ->
     throw({bad_manifest, {bad_partition_role, lists:reverse([I | Stack]), Role}});
-parse_vfat_partitions(_, I, Stack, _Opts, _Acc) ->
+parse_mbr_partitions(_, I, Stack, _Opts, _Acc) ->
+    throw({bad_manifest, {bad_partition, lists:reverse([I | Stack])}}).
+
+parse_gpt_partitions([], _I, _Stack, _Opts, Acc) ->
+    lists:reverse(Acc);
+parse_gpt_partitions([{Role, Props} | Rem], I, Stack, _Opts, Acc)
+  when Role =:= system ->
+    %TODO: Factorize this duplicated code
+    Stack2 = [Role, I | Stack],
+    Part = #gpt_partition{
+        role = Role,
+        id = get_reqint(Props, Stack2, id),
+        type = get_requuid(Props, Stack2, type),
+        uuid = get_requuid(Props, Stack2, uuid),
+        start = get_reqint(Props, Stack2, start),
+        size = get_reqint(Props, Stack2, size)
+    },
+    parse_gpt_partitions(Rem, I + 1, Stack, _Opts, [Part | Acc]);
+parse_gpt_partitions([{Role, Props} | Rem], I, Stack, _Opts, Acc)
+  when Role =:= data; Role =:= boot ->
+    %TODO: Factorize this duplicated code
+    Stack2 = [Role, I | Stack],
+    Part = #gpt_partition{
+        role = Role,
+        type = get_requuid(Props, Stack2, type),
+        uuid = get_requuid(Props, Stack2, uuid),
+        start = get_reqint(Props, Stack2, start),
+        size = get_reqint(Props, Stack2, size)
+    },
+    parse_gpt_partitions(Rem, I + 1, Stack, _Opts, [Part | Acc]);
+parse_gpt_partitions([{Role, _} | _], I, Stack, _Opts, _Acc) ->
+    throw({bad_manifest, {bad_partition_role, lists:reverse([I | Stack]), Role}});
+parse_gpt_partitions(_, I, Stack, _Opts, _Acc) ->
     throw({bad_manifest, {bad_partition, lists:reverse([I | Stack])}}).
 
 parse_objects([], _I, _Stack, _Opts, Acc, C, D, B) ->
     {lists:reverse(Acc), C, D, B};
 parse_objects([{Type, Props} | Rem], I, Stack, Opts, Acc, C, D, B)
-  when Type =:= bootloader; Type =:= rootfs ->
+  when Type =:= bootloader; Type =:= kernel; Type =:= rootfs ->
     Stack2 = [I | Stack],
     case filter_object(Type, Props, Stack2, Opts) of
         false ->
@@ -135,9 +188,14 @@ parse_objects(_, I, Stack, _Opts, _Acc, _C, _D, _B) ->
     throw({bad_manifest, {bad_object, lists:reverse([I | Stack])}}).
 
 parse_target({raw, Props}, Stack) ->
-    #raw{
+    #raw_target_spec{
         context = get_reqenum(Props, Stack, context, [global, system]),
         offset = get_reqint(Props, Stack, offset)
+    };
+parse_target({file, Props}, Stack) ->
+    #file_target_spec{
+        context = get_reqenum(Props, Stack, context, [global, system]),
+        path = get_reqbin(Props, Stack, path)
     };
 parse_target({T, _}, Stack) ->
     throw({bad_manifest, {bad_target_type, lists:reverse(Stack), T}});
@@ -152,12 +210,27 @@ parse_content([{block, Props} | Rem], I, Stack, Opts, Acc, C, D, B) ->
     DataHashesStack = [data_hashes | Stack2],
     {DataHashType, DataHash} =
         choose_hash(DataHashes, DataHashesStack, [sha256]),
-    BlockHashes = get_reqlist(Props, Stack2, block_hashes),
-    BlockHashesStack = [block_hashes | Stack2],
-    {BlockHashType, BlockHash} =
-        choose_hash(BlockHashes, BlockHashesStack, [sha256]),
     DataSize = get_reqint(Props, Stack, data_size),
-    BlockSize = get_reqint(Props, Stack, block_size),
+    {BlockEncoding, B2} =
+        case get_reqenum(Props, Stack, block_format, [raw, gzip]) of
+            raw ->
+                {#raw_encoding{
+                    block_path = get_reqbin(Props, Stack, block_path)
+                 }, DataSize};
+            gzip ->
+                BlockHashes = get_reqlist(Props, Stack2, block_hashes),
+                BlockHashesStack = [block_hashes | Stack2],
+                {BlockHashType, BlockHash} =
+                    choose_hash(BlockHashes, BlockHashesStack, [sha256]),
+                BlockSize = get_reqint(Props, Stack, block_size),
+                {#gzip_encoding{
+                    block_size = BlockSize,
+                    block_crc = get_reqint(BlockHashes, BlockHashesStack, crc32),
+                    block_hash_type = BlockHashType,
+                    block_hash_data = BlockHash,
+                    block_path = get_reqbin(Props, Stack, block_path)
+                 }, BlockSize}
+        end,
     Block = #block{
         id = I,
         data_offset = get_reqint(Props, Stack, data_offset),
@@ -165,15 +238,10 @@ parse_content([{block, Props} | Rem], I, Stack, Opts, Acc, C, D, B) ->
         data_crc = get_reqint(DataHashes, DataHashesStack, crc32),
         data_hash_type = DataHashType,
         data_hash_data = DataHash,
-        block_format = get_reqenum(Props, Stack, block_format, [gzip]),
-        block_size = BlockSize,
-        block_crc = get_reqint(BlockHashes, BlockHashesStack, crc32),
-        block_hash_type = BlockHashType,
-        block_hash_data = BlockHash,
-        block_path = get_reqbin(Props, Stack, block_path)
+        encoding = BlockEncoding
     },
     parse_content(Rem, I + 1, Stack, Opts, [Block | Acc],
-                  C + 1, D + DataSize, B + BlockSize);
+                  C + 1, D + DataSize, B + B2);
 parse_content([{T, _} | _], I, Stack, _Opts, _Acc, _C, _D, _B) ->
     throw({bad_manifest, {bad_content_type, lists:reverse([I | Stack]), T}});
 parse_content(_, I, Stack, _Opts, _Acc, _C, _D, _B) ->
@@ -298,6 +366,19 @@ get_reqenum(Props, Stack, Key, Options) ->
             case lists:member(Value, Options) of
                 true -> Value;
                 false ->  throw({bad_manifest, {bad_value, Path, Value}})
+            end
+    end.
+
+get_requuid(Props, Stack, Key) ->
+    Path = lists:reverse([Key | Stack]),
+    case proplists:lookup(Key, Props) of
+        none -> throw({bad_manifest, {missing_key, Path}});
+        {_, Value} ->
+            try uuid:string_to_uuid(Value) of
+                UUID -> UUID
+            catch
+                exit:badarg ->
+                    throw({bad_manifest, {bad_value, Path, Value}})
             end
     end.
 

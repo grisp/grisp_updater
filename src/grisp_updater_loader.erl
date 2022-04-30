@@ -45,10 +45,10 @@
 -record(stream, {
     id :: non_neg_integer(),
     ref :: reference(),
-    block_left :: non_neg_integer(),
+    block_left :: undefined | non_neg_integer(),
     data_left :: non_neg_integer(),
     data_offset :: non_neg_integer(),
-    block_hash :: term(),
+    block_hash :: undefined | term(),
     data_hash :: term(),
     inflater :: term()
 }).
@@ -127,6 +127,9 @@ handle_info(Info, State) ->
 
 %--- Internal ------------------------------------------------------------------
 
+block_path(#block{encoding = #raw_encoding{block_path = Path}}) -> Path;
+block_path(#block{encoding = #gzip_encoding{block_path = Path}}) -> Path.
+
 do_abort(State) ->
     cancel_pendings(State#state{schedule = queue:new()}).
 
@@ -134,8 +137,9 @@ do_cancel(State, BlockId) ->
     cancel_pending(State, BlockId).
 
 do_schedule(#state{pending = PendMap, schedule = Sched} = State,
-            Url, #block{id = Id, block_path = Path} = Block, Target, Offset) ->
-    ?LOG_DEBUG("Scheduling block ~b for streaming from ~s/~s", [Id, Url, Path]),
+            Url, #block{id = Id} = Block, Target, Offset) ->
+    ?LOG_DEBUG("Scheduling block ~b for streaming from ~s/~s",
+               [Id, Url, block_path(Block)]),
     Pending = #pending{
         url = Url,
         block = Block,
@@ -164,7 +168,7 @@ start_streams(#state{concurrency = Concurrency, streams = StreamMap,
 
 start_stream(#state{pending = PendMap, streams = StreamMap} = State, Id) ->
     #{Id := #pending{url = Url, block = Block} = Pending} = PendMap,
-    #block{block_path = Path} = Block,
+    Path = block_path(Block),
     ?LOG_DEBUG("Start streaming block ~b from ~s/~s", [Id, Url, Path]),
 
     case grisp_updater_source:stream(Url, Path, ?MODULE, Id) of
@@ -219,16 +223,50 @@ got_data(#state{pending = PendMap, streams = StreamMap} = State,
     #{Id := #pending{stream = StreamRef} = Pending} = PendMap,
     #{StreamRef := #stream{id = Id} = Stream} = StreamMap,
     #pending{
-        block = #block{
-            id = Id,
-            data_offset = DataOffset
-        },
-        target = #target{
-            device = Device,
-            offset = DeviceOffset
-        },
-        offset = ObjOffset,
+        block = #block{id = Id, encoding = Encoding},
         stream = StreamRef
+    } = Pending,
+    case got_data(State, Pending, Stream, Encoding, BlockData) of
+        {ok, Stream2, State2} ->
+            StreamMap2 = StreamMap#{StreamRef := Stream2},
+            {ok, State2#state{streams = StreamMap2}};
+        {error, _Reason} = Error ->
+            Error
+    end.
+
+got_data(State, Pending, Stream, #raw_encoding{}, BlockData) ->
+    #pending{
+        block = #block{data_offset = DataOffset},
+        target = #target{device = Device, offset = DeviceOffset},
+        offset = ObjOffset
+    } = Pending,
+    #stream{
+        data_left = DataLeft,
+        data_offset = WriteOffset,
+        data_hash = DataHash
+    } = Stream,
+    ChunkSize = byte_size(BlockData),
+    case  ChunkSize =< DataLeft of
+        false -> {error, block_too_large};
+        true ->
+            DataHash2 = crypto:hash_update(DataHash, BlockData),
+            Seek = DeviceOffset + ObjOffset + DataOffset + WriteOffset,
+            case grisp_updater_storage:write(Device, Seek, BlockData) of
+                {error, Reason} -> {error, {write_error, Reason}};
+                ok ->
+                    Stream2 = Stream#stream{
+                        data_left = DataLeft - ChunkSize,
+                        data_offset = WriteOffset + ChunkSize,
+                        data_hash = DataHash2
+                    },
+                    {ok, Stream2, State}
+            end
+    end;
+got_data(State, Pending, Stream, #gzip_encoding{}, BlockData) ->
+    #pending{
+        block = #block{data_offset = DataOffset},
+        target = #target{device = Device, offset = DeviceOffset},
+        offset = ObjOffset
     } = Pending,
     #stream{
         block_left = BlockLeft,
@@ -240,14 +278,14 @@ got_data(#state{pending = PendMap, streams = StreamMap} = State,
     } = Stream,
     ChunkSize = byte_size(BlockData),
     case  ChunkSize =< BlockLeft of
-        false -> {error, deflated_block_too_large};
+        false -> {error, encoded_block_too_large};
         true ->
             BlockHash2 = crypto:hash_update(BlockHash, BlockData),
             try zlib:inflate(Z, BlockData) of
                 Data ->
                     InflatedChuckSize = iolist_size(Data),
                     case InflatedChuckSize =< DataLeft of
-                        false -> {error, inflated_block_too_large};
+                        false -> {error, decoded_block_too_large};
                         true ->
                             DataHash2 = crypto:hash_update(DataHash, Data),
                             Seek = DeviceOffset + ObjOffset + DataOffset + WriteOffset,
@@ -261,8 +299,7 @@ got_data(#state{pending = PendMap, streams = StreamMap} = State,
                                         data_hash = DataHash2,
                                         block_hash = BlockHash2
                                     },
-                                    StreamMap2 = StreamMap#{StreamRef := Stream2},
-                                    {ok, State#state{streams = StreamMap2}}
+                                    {ok, Stream2, State}
                             end
                     end
             catch
@@ -274,17 +311,39 @@ stream_terminated(#state{pending = PendMap, streams = StreamMap} = State,
                   StreamRef) ->
     #{StreamRef := #stream{id = Id} = Stream} = StreamMap,
     #{Id := #pending{stream = StreamRef, block = Block}} = PendMap,
+    #block{id = Id, encoding = Encoding} = Block,
+    State2 = stream_terminated(State, Block, Stream, Encoding),
+    cleanup_stream(Stream),
+    State2#state{pending = maps:remove(Id, PendMap),
+                 streams = maps:remove(StreamRef, StreamMap)}.
+
+stream_terminated(State, Block, Stream, #raw_encoding{}) ->
+    #block{id = Id, data_hash_data = ExpDataHash} = Block,
+    #stream{data_left = DataLeft, data_hash = DataHash} = Stream,
+    GotDataHash = crypto:hash_final(DataHash),
+    case {DataLeft, GotDataHash} of
+        {0, ExpDataHash} ->
+           grisp_updater_manager:loader_done(Id);
+        {V, _} when V =:= 0 ->
+            grisp_updater_manager:loader_failed(Id, data_size_mismatch);
+        {_, H} when H =/= ExpDataHash ->
+            grisp_updater_manager:loader_failed(Id, data_hash_mismatch)
+    end,
+    State;
+stream_terminated(State, Block, Stream, #gzip_encoding{}) ->
+    #block{
+        id = Id,
+        data_hash_data = ExpDataHash,
+        encoding = #gzip_encoding{
+            block_hash_data = ExpBlockHash
+        }
+    } = Block,
     #stream{
         block_left = BlockLeft,
         data_left = DataLeft,
         data_hash = DataHash,
         block_hash = BlockHash
     } = Stream,
-    #block{
-        id = Id,
-        data_hash_data = ExpDataHash,
-        block_hash_data = ExpBlockHash
-    } = Block,
     GotDataHash = crypto:hash_final(DataHash),
     GotBlockHash = crypto:hash_final(BlockHash),
     case {BlockLeft, DataLeft, GotBlockHash, GotDataHash} of
@@ -299,18 +358,30 @@ stream_terminated(#state{pending = PendMap, streams = StreamMap} = State,
         {_, _, _, H} when H =/= ExpDataHash ->
             grisp_updater_manager:loader_failed(Id, data_hash_mismatch)
     end,
-    cleanup_stream(Stream),
-    State#state{pending = maps:remove(Id, PendMap),
-                streams = maps:remove(StreamRef, StreamMap)}.
+    State.
 
-init_stream(Block, StreamRef) ->
+init_stream(#block{encoding = #raw_encoding{}} = Block, StreamRef) ->
     #block{
         id = Id,
-        block_format = gzip,
-        block_size = BlockSize,
         data_size = DataSize,
-        block_hash_type = BlockHashType,
         data_hash_type = DataHashType
+    } = Block,
+    #stream{
+        id = Id,
+        ref = StreamRef,
+        data_left = DataSize,
+        data_offset = 0,
+        data_hash = crypto:hash_init(DataHashType)
+    };
+init_stream(#block{encoding = #gzip_encoding{}} = Block, StreamRef) ->
+    #block{
+        id = Id,
+        data_size = DataSize,
+        data_hash_type = DataHashType,
+        encoding = #gzip_encoding{
+            block_size = BlockSize,
+            block_hash_type = BlockHashType
+        }
     } = Block,
     Z = zlib:open(),
     zlib:inflateInit(Z, 16 + 15, reset),
@@ -350,6 +421,8 @@ cancel_stream(#state{streams = StreamMap} = State, StreamRef) ->
             State#state{streams = StreamMap2}
     end.
 
+cleanup_stream(#stream{inflater = undefined}) ->
+    ok;
 cleanup_stream(#stream{inflater = Z}) ->
     catch zlib:inflateEnd(Z),
     catch zlib:close(Z),

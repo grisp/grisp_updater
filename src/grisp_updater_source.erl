@@ -323,8 +323,6 @@ decref_source(#state{sources = SourceMap} = State,
         {ok, #source{refcount = RefCount} = Source} ->
             Source2 = Source#source{refcount = RefCount - 1},
             Source3 = if
-                MinRefCount =:= infinity ->
-                    schedule_close_source(Source2, infinity);
                 RefCount =< MinRefCount ->
                     schedule_close_source(Source2, MinRefCount - 1);
                 true ->

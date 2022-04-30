@@ -44,7 +44,7 @@ source_open(#state{files = Files} = State, Url, _Opts) ->
                         files = Files#{SourceRef => Path}
                     }}
             end;
-        _ ->
+        _Other ->
             not_supported
     end.
 

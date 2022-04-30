@@ -7,6 +7,8 @@
 
 -include_lib("kernel/include/logger.hrl").
 
+-include("grisp_updater.hrl").
+
 
 %--- Exports -------------------------------------------------------------------
 
@@ -15,6 +17,7 @@
 -export([system_device/1]).
 -export([system_get_active/1]).
 -export([system_prepare_update/2]).
+-export([system_prepare_target/3]).
 -export([system_set_updated/2]).
 -export([system_validate/1]).
 -export([system_terminate/2]).
@@ -72,6 +75,18 @@ system_get_active(_State) ->
 system_prepare_update(State, 1) ->
     ?LOG_DEBUG("Preparing system 1 for update", []),
     {ok, State}.
+
+system_prepare_target(_State, SysId,
+        #file_target_spec{context = Context, path = Path} = Spec) ->
+    Path2 = iolist_to_binary(lists:join("#", string:split(Path, "/", all))),
+    Path3 = iolist_to_binary(io_lib:format("dummy.~s", [Path2])),
+    Path4 = case Context of
+        system -> iolist_to_binary(io_lib:format("~s.~b", [Path3, SysId]));
+        _ -> Path3
+    end,
+    {ok, Spec#file_target_spec{path = Path4}};
+system_prepare_target(_State, _SysId, TargetSpec) ->
+    {ok, TargetSpec}.
 
 system_set_updated(State, SystemId) ->
     ?LOG_DEBUG("System ~b marked as update", [SystemId]),

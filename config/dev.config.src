@@ -1,7 +1,7 @@
 [
     {grisp_updater, [
         %{storage, {grisp_updater_filesystem, #{}}},
-        %{system, {grisp_updater_dummy, #{}}},
+        {system, {grisp_updater_dummy, #{device_size => 1140850688}}},
         %{sources, [{grisp_updater_tarball, #{}}]}
     ]},
 

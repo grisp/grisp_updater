@@ -145,7 +145,7 @@ do_digest(State, Desc, UpdateFun, FinalFun, Offset, RemSize, BlockSize, H) ->
             {error, Reason, State2};
         {ok, Block, State2} when byte_size(Block) < ReadSize ->
             {ok, State3} = storage_close(State2, Desc),
-            {error, end_of_device, State3};
+            {error, eof, State3};
         {ok, Block, State2} ->
             H2 = UpdateFun(H, Block),
             do_digest(State2, Desc, UpdateFun, FinalFun, Offset + ReadSize,

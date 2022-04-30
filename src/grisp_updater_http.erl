@@ -175,7 +175,7 @@ source_handle(#state{connections = ConnMap} = State,
         error -> pass;
         {ok, #conn{}} ->
             gun:cancel(ConnPid, StreamRef),
-            gun:flush(ConnPid, StreamRef),
+            gun:flush(StreamRef),
             {stream_error, [StreamRef], {http_error, Status}, State}
     end;
 source_handle(#state{connections = ConnMap} = State,

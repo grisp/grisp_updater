@@ -20,4 +20,4 @@ rebar3.crashdump
 *.gz
 *.tar
 config/dev.config
-dummy.img
+dummy.*
