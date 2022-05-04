@@ -17,15 +17,17 @@
 
 -callback system_init(Opts :: map()) ->
     {ok, State :: term()} | {error, term()}.
--callback system_device(State :: term()) ->
-    Device :: binary().
+-callback system_get_global_target(State :: term()) ->
+    GlobalTarget :: target().
 -callback system_get_active(State :: term()) ->
-    {system_id() | removable, Validated :: boolean() | undefined}.
+    {SysId :: system_id() | removable, Validated :: boolean() | undefined}.
+-callback system_get_updatable(State :: term()) ->
+    {ok, SysId :: system_id(), SystemTarget :: target()} | {error, Reason :: term}.
 -callback system_prepare_update(State :: term(), SysId :: system_id()) ->
     {ok, State :: term()} | {error, term()}.
 -callback system_prepare_target(State :: term(), SysId :: system_id(),
-                                Target :: target_spec()) ->
-    {ok, NewTarget :: target_spec()}.
+                                SysTarget :: target(), Spec :: target_spec()) ->
+    {ok, Target :: target()}.
 -callback system_set_updated(State :: term(), SysId :: system_id()) ->
     {ok, State :: term()} | {error, term()}.
 -callback system_validate(State :: term()) ->
@@ -33,4 +35,4 @@
 -callback system_terminate(State :: term(), Reason :: term()) ->
     ok.
 
--optional_callbacks([system_prepare_target/3]).
+-optional_callbacks([system_get_updatable/1, system_prepare_target/4]).

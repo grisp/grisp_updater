@@ -47,7 +47,6 @@
 -record(pending, {
     status :: checking | loading,
     target :: #target{},
-    offset :: non_neg_integer(),
     block :: #block{},
     retry = 0 :: non_neg_integer()
 }).
@@ -58,10 +57,7 @@
     manifest :: undefined | term(),
     stats :: undefined | grisp_updater_progress:statistics(),
     system_id :: undefined | non_neg_integer(),
-    targets :: undefined | #{
-        global := #target{},
-        system := #target{}
-    },
+    system_target :: undefined | target(),
     objects :: undefined | [#object{}],
     pending :: undefined | #{integer() => #pending{}}
 }).
@@ -244,11 +240,8 @@ do_start_update(#data{update = Up} = Data,
                         update = Up#update{
                             manifest = Manifest,
                             system_id = SysId,
-                            objects = Objs,
-                            targets = #{
-                                global => global_target(Data),
-                                system => SysTarget
-                            }
+                            system_target = SysTarget,
+                            objects = Objs
                         }
                     },
                     {ok, stats_init(Data3, BlockCount, DataSize)}
@@ -271,12 +264,21 @@ select_update_target(Data, Manifest) ->
             {error, current_system_not_validated};
         {CurrSysId, true} ->
             ?LOG_INFO("Current validate system: ~w", [CurrSysId]),
-            select_next_system(Data, CurrSysId, Manifest)
+            get_next_system(Data, CurrSysId, Manifest)
+    end.
+
+
+
+get_next_system(Data, CurrSysId, Manifest) ->
+    case system_get_updatable(Data) of
+        undefined -> select_next_system(Data, CurrSysId, Manifest);
+        {ok, Id, Target} -> {ok, Id, Target};
+        {error, _Reason} = Error -> Error
     end.
 
 %TODO: Factorize this code
 select_next_system(Data, CurrSysId,
-                   #manifest{structure = #mbr{} = Structure}) ->
+                      #manifest{structure = #mbr{} = Structure}) ->
     #mbr{sector_size = SecSize, partitions = Partitions} = Structure,
     case lists_keysplit(CurrSysId, #mbr_partition.id, Partitions) of
         not_found ->
@@ -289,17 +291,18 @@ select_next_system(Data, CurrSysId,
                     ?LOG_ERROR("No appropriate system partition found in update package MBR structure", []),
                     {error, update_system_partition_not_found};
                 #mbr_partition{id = Id, start = Start, size = Size} ->
-                    DeviceFile = system_device(Data),
-                    Device = #target{
-                        device = DeviceFile,
-                        offset = Start * SecSize,
+                    GlobalTarget = #target{offset = BaseOffset}
+                        = system_get_global_target(Data),
+                    %TODO: Add some boundary checks
+                    Target = GlobalTarget#target{
+                        offset = BaseOffset + Start * SecSize,
                         size = Size * SecSize
                     },
-                    {ok, Id, Device}
+                    {ok, Id, Target}
             end
     end;
 select_next_system(Data, CurrSysId,
-                   #manifest{structure = #gpt{} = Structure}) ->
+                      #manifest{structure = #gpt{} = Structure}) ->
     #gpt{sector_size = SecSize, partitions = Partitions} = Structure,
     case lists_keysplit(CurrSysId, #gpt_partition.id, Partitions) of
         not_found ->
@@ -312,13 +315,14 @@ select_next_system(Data, CurrSysId,
                     ?LOG_ERROR("No appropriate system partition found in update package GPT structure", []),
                     {error, update_system_partition_not_found};
                 #gpt_partition{id = Id, start = Start, size = Size} ->
-                    DeviceFile = system_device(Data),
-                    Device = #target{
-                        device = DeviceFile,
-                        offset = Start * SecSize,
+                    GlobalTarget = #target{offset = BaseOffset}
+                        = system_get_global_target(Data),
+                    %TODO: Add some boundary checks
+                    Target = GlobalTarget#target{
+                        offset = BaseOffset + Start * SecSize,
                         size = Size * SecSize
                     },
-                    {ok, Id, Device}
+                    {ok, Id, Target}
             end
     end.
 
@@ -334,27 +338,25 @@ first_system_partition([_ | Rest]) ->
 
 bootstrap_object(#data{update = #update{objects = [Obj | _],
                                         system_id = SysId,
+                                        system_target = SysTarget,
                                         pending = undefined} = Up} = Data) ->
     ?LOG_INFO("Starting updating ~s", [object_name(Obj)]),
     #object{target = TargetSpec, blocks = Blocks} = Obj,
-    case system_prepare_target(Data, SysId, TargetSpec) of
-        {ok, #raw_target_spec{context = Ctx, offset = ExtraOffset}} ->
-            #update{targets = #{Ctx := Target}} = Up,
-            bootstrap_object(Data, Up, Target, ExtraOffset, Blocks);
-        {ok, #file_target_spec{path = Path}} ->
-            Target = #target{device = Path, offset = 0},
-            bootstrap_object(Data, Up, Target, 0, Blocks);
+    case system_prepare_target(Data, SysId, SysTarget, TargetSpec) of
+        {ok, ObjTarget} ->
+            bootstrap_object(Data, Up, ObjTarget, Blocks);
         {error, Reason} = Error ->
             ?LOG_ERROR("Error while preparing target ~p for system ~b: ~p",
                        [TargetSpec, SysId, Reason]),
             Error
     end.
 
-bootstrap_object(Data, Up, Target, ExtraOffset, Blocks) ->
+
+bootstrap_object(Data, Up, ObjTarget, Blocks) ->
     Pending = lists:foldl(fun(#block{id = Id} = B, Map) ->
-        grisp_updater_checker:schedule_check(B, Target, ExtraOffset),
+        grisp_updater_checker:schedule_check(B, ObjTarget),
         Map#{Id => #pending{status = checking, block = B,
-                            target = Target, offset = ExtraOffset}}
+                            target = ObjTarget}}
     end, #{}, Blocks),
     Up2 = Up#update{pending = Pending},
     {ok, Data#data{update = Up2}}.
@@ -400,10 +402,10 @@ got_checker_done(#data{update = Up} = Data, BlockId, false) ->
                          [BlockId]),
             {ok, Data};
         {ok, #pending{status = checking} = Pending} ->
-            #pending{target = Target, offset = Offset, block = Block} = Pending,
+            #pending{target = Target, block = Block} = Pending,
             Pending2 = Pending#pending{status = loading},
             Map2 = Map#{BlockId := Pending2},
-            grisp_updater_loader:schedule_load(Url, Block, Target, Offset),
+            grisp_updater_loader:schedule_load(Url, Block, Target),
             Data2 = Data#data{update = Up#update{pending = Map2}},
             {ok, stats_block_checked(Data2, Block, true)};
         {ok, #pending{status = Status}} ->
@@ -458,11 +460,11 @@ got_loader_failed(#data{update = Up} = Data, BlockId, Reason) ->
                          [BlockId]),
             {ok, Data};
         {ok, #pending{status = loading, retry = Retry} = Pending} ->
-            #pending{block = Block, target = Target, offset = Offset} = Pending,
+            #pending{block = Block, target = Target} = Pending,
             Pending2 = Pending#pending{retry = Retry + 1},
             Map2 = Map#{BlockId := Pending2},
             Data2 = Data#data{update = Up#update{pending = Map2}},
-            grisp_updater_loader:schedule_load(Url, Block, Target, Offset),
+            grisp_updater_loader:schedule_load(Url, Block, Target),
             {ok, stats_block_retried(Data2)};
         {ok, #pending{status = Status}} ->
             ?LOG_WARNING("Received loader error for unexpected block ~w currently ~w",
@@ -562,9 +564,6 @@ update_failed(#data{update = #update{stats = Stats} = Up} = Data, Reason) ->
     progress_error(Up, Stats, Reason),
     {done, Data#data{update = undefined}}.
 
-global_target(Data) ->
-    #target{device = system_device(Data), offset = 0, size = undefined}.
-
 object_name(#object{product = Name}) when Name =/= undefined -> Name;
 object_name(#object{type = Name}) when Name =/= undefined -> Name.
 
@@ -588,11 +587,16 @@ system_init(#data{system = undefined} = Data, {Mod, Params}) ->
         {ok, Sub} -> {ok, Data#data{system = {Mod, Sub}}}
     end.
 
+system_get_global_target(#data{system = {Mod, Sub}}) ->
+    Mod:system_get_global_target(Sub).
+
 system_get_active(#data{system = {Mod, Sub}}) ->
     Mod:system_get_active(Sub).
 
-system_device(#data{system = {Mod, Sub}}) ->
-    Mod:system_device(Sub).
+system_get_updatable(#data{system = {Mod, Sub}}) ->
+    try Mod:system_get_updatable(Sub)
+    catch error:undef -> undefined
+    end.
 
 system_prepare_update(#data{system = {Mod, Sub}} = Data, SysId) ->
     try Mod:system_prepare_update(Sub, SysId) of
@@ -602,13 +606,23 @@ system_prepare_update(#data{system = {Mod, Sub}} = Data, SysId) ->
         error:undef -> {ok, Data}
     end.
 
-system_prepare_target(#data{system = {Mod, Sub}}, SysId, Spec) ->
-    try Mod:system_prepare_target(Sub, SysId, Spec) of
-        {error, _Reason} = Error -> Error;
-        {ok, Spec2} -> {ok, Spec2}
-    catch
-        error:undef -> {ok, Spec}
+system_prepare_target(#data{system = {Mod, Sub}} = Data, SysId, SysTarget, Spec) ->
+    try Mod:system_prepare_target(Sub, SysId, SysTarget, Spec)
+    catch error:undef ->
+        {ok, default_system_prepare_target(Data, SysId, SysTarget, Spec)}
     end.
+
+default_system_prepare_target(_Data, _SysId, _SysTarget,
+                              #file_target_spec{path = Path}) ->
+    #target{device = Path, offset = 0, size = undefined};
+default_system_prepare_target(_Data, _SysId, #target{offset = SysOffset} = SysTarget,
+                              #raw_target_spec{context = system, offset = ObjOffset}) ->
+    SysTarget#target{offset = SysOffset + ObjOffset};
+default_system_prepare_target(#data{system = {Mod, Sub}}, _SysId, _SysTarget,
+                              #raw_target_spec{context = global, offset = Offset}) ->
+    GlobTarget = #target{offset = GlobOffset} = Mod:system_get_global(Sub),
+    GlobTarget#target{offset = GlobOffset + Offset}.
+
 
 system_set_updated(#data{system = {Mod, Sub}} = Data, SysId) ->
     case Mod:system_set_updated(Sub, SysId) of

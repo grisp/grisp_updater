@@ -15,7 +15,7 @@
 
 % API
 -export([start_link/1]).
--export([schedule_load/4]).
+-export([schedule_load/3]).
 -export([cancel_load/1]).
 -export([abort/0]).
 
@@ -38,7 +38,6 @@
     url :: binary(),
     block :: #block{},
     target :: #target{},
-    offset :: integer(),
     stream :: undefined | reference()
 }).
 
@@ -71,8 +70,8 @@
 start_link(Opts) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, Opts, []).
 
-schedule_load(Url, Block, Target, Offset) ->
-    gen_server:cast(?MODULE, {schedule, Url, Block, Target, Offset}).
+schedule_load(Url, Block, Target) ->
+    gen_server:cast(?MODULE, {schedule, Url, Block, Target}).
 
 cancel_load(BlockId) ->
     gen_server:call(?MODULE, {cancel, BlockId}).
@@ -108,8 +107,8 @@ handle_call({cancel, BlockId}, _From, State) ->
 handle_call(Request, From, State) ->
     ?LOG_WARNING("Unexpected call from ~p: ~p", [From, Request]),
     {reply, {error, unexpected_call}, State}.
-handle_cast({schedule, Url, Block, Target, Offset}, State) ->
-    {noreply, do_schedule(State, Url, Block, Target, Offset)};
+handle_cast({schedule, Url, Block, Target}, State) ->
+    {noreply, do_schedule(State, Url, Block, Target)};
 handle_cast({sink_error, StreamRef, Params, Reason}, State) ->
     {noreply, got_sink_error(State, StreamRef, Params, Reason)};
 handle_cast({sink_data, StreamRef, Params, Data}, State) ->
@@ -137,14 +136,13 @@ do_cancel(State, BlockId) ->
     cancel_pending(State, BlockId).
 
 do_schedule(#state{pending = PendMap, schedule = Sched} = State,
-            Url, #block{id = Id} = Block, Target, Offset) ->
+            Url, #block{id = Id} = Block, Target) ->
     ?LOG_DEBUG("Scheduling block ~b for streaming from ~s/~s",
                [Id, Url, block_path(Block)]),
     Pending = #pending{
         url = Url,
         block = Block,
         target = Target,
-        offset = Offset,
         stream = undefined
     },
     error = maps:find(Id, PendMap),
@@ -237,8 +235,7 @@ got_data(#state{pending = PendMap, streams = StreamMap} = State,
 got_data(State, Pending, Stream, #raw_encoding{}, BlockData) ->
     #pending{
         block = #block{data_offset = DataOffset},
-        target = #target{device = Device, offset = DeviceOffset},
-        offset = ObjOffset
+        target = #target{device = Device, offset = DeviceOffset}
     } = Pending,
     #stream{
         data_left = DataLeft,
@@ -250,7 +247,7 @@ got_data(State, Pending, Stream, #raw_encoding{}, BlockData) ->
         false -> {error, block_too_large};
         true ->
             DataHash2 = crypto:hash_update(DataHash, BlockData),
-            Seek = DeviceOffset + ObjOffset + DataOffset + WriteOffset,
+            Seek = DeviceOffset + DataOffset + WriteOffset,
             case grisp_updater_storage:write(Device, Seek, BlockData) of
                 {error, Reason} -> {error, {write_error, Reason}};
                 ok ->
@@ -265,8 +262,7 @@ got_data(State, Pending, Stream, #raw_encoding{}, BlockData) ->
 got_data(State, Pending, Stream, #gzip_encoding{}, BlockData) ->
     #pending{
         block = #block{data_offset = DataOffset},
-        target = #target{device = Device, offset = DeviceOffset},
-        offset = ObjOffset
+        target = #target{device = Device, offset = DeviceOffset}
     } = Pending,
     #stream{
         block_left = BlockLeft,
@@ -288,7 +284,7 @@ got_data(State, Pending, Stream, #gzip_encoding{}, BlockData) ->
                         false -> {error, decoded_block_too_large};
                         true ->
                             DataHash2 = crypto:hash_update(DataHash, Data),
-                            Seek = DeviceOffset + ObjOffset + DataOffset + WriteOffset,
+                            Seek = DeviceOffset + DataOffset + WriteOffset,
                             case grisp_updater_storage:write(Device, Seek, Data) of
                                 {error, Reason} -> {error, {write_error, Reason}};
                                 ok ->

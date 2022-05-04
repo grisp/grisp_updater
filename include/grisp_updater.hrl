@@ -7,6 +7,8 @@
     size :: undefined | non_neg_integer()
 }).
 
+-type target() :: #target{}.
+
 -record(raw_encoding, {
     block_path :: binary()
 }).

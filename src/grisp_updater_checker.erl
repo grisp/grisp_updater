@@ -14,7 +14,7 @@
 
 % API
 -export([start_link/1]).
--export([schedule_check/3]).
+-export([schedule_check/2]).
 -export([cancel_check/1]).
 -export([abort/0]).
 
@@ -30,8 +30,7 @@
 
 -record(check, {
     block :: #block{},
-    target :: #target{},
-    offset :: integer()
+    target :: #target{}
 }).
 
 -record(state, {
@@ -50,8 +49,8 @@
 start_link(Opts) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, Opts, []).
 
-schedule_check(Block, Target, Offset) ->
-    gen_server:cast(?MODULE, {schedule, Block, Target, Offset}).
+schedule_check(Block, Target) ->
+    gen_server:cast(?MODULE, {schedule, Block, Target}).
 
 cancel_check(BlockId) ->
     gen_server:call(?MODULE, {cancel, BlockId}).
@@ -75,9 +74,9 @@ handle_call(Request, From, State) ->
     ?LOG_WARNING("Unexpected call from ~p: ~p", [From, Request]),
     {reply, {error, unexpected_call}, State, timeout(State)}.
 
-handle_cast({schedule, #block{id = Id} = Block, Target, Offset},
+handle_cast({schedule, #block{id = Id} = Block, Target},
             #state{pending = M, schedule = Q} = State) ->
-    Check = #check{block = Block, target = Target, offset = Offset},
+    Check = #check{block = Block, target = Target},
     case maps:find(Id, M) of
         {ok, _} ->
             grisp_updater_manager:checker_error(Id, already_scheduled),
@@ -122,14 +121,13 @@ do_check(State, Check) ->
             data_size = DataSize,
             data_crc = ExpectedCrc
         },
-        target = #target{device = Device, offset = DeviceOffset},
-        offset = TargetOffset
+        target = #target{device = Device, offset = DeviceOffset}
     } = Check,
-    ?LOG_DEBUG("Checking block ~b [~b+~b+~b=~b:~b] from ~s",
-               [Id, DeviceOffset, TargetOffset, DataOffset,
-                DeviceOffset + TargetOffset + DataOffset, DataSize, Device]),
-    Offset = DeviceOffset + TargetOffset + DataOffset,
-    %TODO: Mabe do some boundary checks ?
+    ?LOG_DEBUG("Checking block ~b [~b+~b=~b:~b] from ~s",
+               [Id, DeviceOffset, DataOffset,
+                DeviceOffset + DataOffset, DataSize, Device]),
+    Offset = DeviceOffset + DataOffset,
+    %TODO: Mabe do some device boundary checks ?
     case grisp_updater_storage:digest(crc32, Device, Offset, DataSize) of
         {error, eof} ->
             % Needed to check files that may be smaller than they updated version
