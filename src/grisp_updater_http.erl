@@ -58,18 +58,22 @@
     url :: binary(),
     pid :: pid() | undefined,
     mon :: reference() | undefined,
-    proto :: atom() | undefined
+    proto :: atom() | undefined,
+    size = 0 :: non_neg_integer(),
+    data = [] :: iolist()
 }).
 
 -record(state, {
     callbacks :: {module(), term()} | undefined,
-    connections = #{} :: #{pid() => #conn{}}
+    connections = #{} :: #{pid() => #conn{}},
+    streaming :: boolean()
 }).
 
 
 %--- Macros --------------------------------------------------------------------
 
 -define(CONNECTION_TIMEOUT, 5000).
+-define(MIN_PACKET_SIZE, 1024 * 1024 * 1024).
 
 
 %--- Utility Functions ---------------------------------------------------------
@@ -92,9 +96,10 @@ join_http_path(Base, Path) ->
 
 source_init(Opts) ->
     ?LOG_INFO("Initializing HTTP update source", []),
+    State = #state{streaming = maps:get(streaming, Opts, true)},
     case maps:find(backend, Opts) of
-        error -> {ok, #state{}};
-        {ok, BackendDef} -> http_init(#state{}, BackendDef)
+        error -> {ok, State};
+        {ok, BackendDef} -> http_init(State, BackendDef)
     end.
 
 source_open(State, Url, _Opts) ->
@@ -192,22 +197,29 @@ source_handle(#state{connections = ConnMap} = State,
         {ok, #conn{}} ->
             {ok, State}
     end;
-
 source_handle(#state{connections = ConnMap} = State,
               {gun_data, ConnPid, StreamRef, nofin, Data}) ->
     case maps:find(ConnPid, ConnMap) of
         error -> pass;
-        {ok, #conn{}} ->
-            {data, StreamRef, Data, State}
+        {ok, Conn} ->
+            case conn_buffer_packet(Conn, Data, false) of
+                {wait, Conn2}  ->
+                    ConnMap2 = ConnMap#{ConnPid := Conn2},
+                    {ok, State#state{connections = ConnMap2}};
+                {packet, Packet, Conn2} ->
+                    ConnMap2 = ConnMap#{ConnPid := Conn2},
+                    {data, StreamRef, Packet, State#state{connections = ConnMap2}}
+            end
     end;
 source_handle(#state{connections = ConnMap} = State,
               {gun_data, ConnPid, StreamRef, fin, Data}) ->
     case maps:find(ConnPid, ConnMap) of
         error -> pass;
-        {ok, #conn{}} ->
-            {done, StreamRef, Data, State}
+        {ok, Conn} ->
+            {packet, Packet, Conn2} = conn_buffer_packet(Conn, Data, true),
+            ConnMap2 = ConnMap#{ConnPid := Conn2},
+            {done, StreamRef, Packet, State#state{connections = ConnMap2}}
     end;
-
 source_handle(#state{connections = ConnMap} = State,
               {gun_error, ConnPid, StreamRef, Reason}) ->
     case maps:find(ConnPid, ConnMap) of
@@ -264,6 +276,16 @@ close_connection(#state{connections = ConnMap} = State, ConnPid) ->
             State#state{connections = ConnMap2}
     end.
 
+conn_buffer_packet(#conn{size = Size, data = Buff} = Conn, Data, IsFinal) ->
+    Size2 = Size + byte_size(Data),
+    case (Size >= ?MIN_PACKET_SIZE) or IsFinal of
+        false ->
+            {wait, Conn#conn{size = Size2, data = [Data | Buff]}};
+        true ->
+            Packet = iolist_to_binary(lists:reverse([Data | Buff])),
+            {packet, Packet, Conn#conn{size = 0, data = []}}
+    end.
+
 
 %--- Callback Handling Functions
 
@@ -315,5 +337,11 @@ http_request_options(#state{callbacks = {Mod, Sub}} = State,
     end.
 
 http_request_options_default(State, _Method, Url, Path) ->
-    #{path := Base} = uri_string:parse(Url),
-    {ok, join_http_path(Base, Path), [], State}.
+    #{path := Base} = Parts = uri_string:parse(Url),
+    Headers = case maps:find(userinfo, Parts) of
+        error -> [];
+        {ok, UserInfo} ->
+            EncodedUserInfo = base64:encode(UserInfo),
+            [{<<"authorization">>, <<"Basic ", EncodedUserInfo/binary>>}]
+    end,
+    {ok, join_http_path(Base, Path), Headers, State}.
