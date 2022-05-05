@@ -155,8 +155,7 @@ parse_gpt_partitions(_, I, Stack, _Opts, _Acc) ->
 
 parse_objects([], _I, _Stack, _Opts, Acc, C, D, B) ->
     {lists:reverse(Acc), C, D, B};
-parse_objects([{Type, Props} | Rem], I, Stack, Opts, Acc, C, D, B)
-  when Type =:= bootloader; Type =:= kernel; Type =:= rootfs ->
+parse_objects([{Type, Props} | Rem], I, Stack, Opts, Acc, C, D, B) ->
     Stack2 = [I | Stack],
     case filter_object(Type, Props, Stack2, Opts) of
         false ->
