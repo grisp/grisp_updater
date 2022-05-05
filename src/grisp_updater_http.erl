@@ -66,14 +66,14 @@
 -record(state, {
     callbacks :: {module(), term()} | undefined,
     connections = #{} :: #{pid() => #conn{}},
-    streaming :: boolean()
+    min_packet_size :: non_neg_integer()
 }).
 
 
 %--- Macros --------------------------------------------------------------------
 
 -define(CONNECTION_TIMEOUT, 5000).
--define(MIN_PACKET_SIZE, 1024 * 1024 * 1024).
+-define(DEFAULT_MIN_PACKET_SIZE, 1024 * 1024).
 
 
 %--- Utility Functions ---------------------------------------------------------
@@ -96,7 +96,10 @@ join_http_path(Base, Path) ->
 
 source_init(Opts) ->
     ?LOG_INFO("Initializing HTTP update source", []),
-    State = #state{streaming = maps:get(streaming, Opts, true)},
+    State = #state{
+        min_packet_size = maps:get(min_packet_size, Opts,
+                                   ?DEFAULT_MIN_PACKET_SIZE)
+    },
     case maps:find(backend, Opts) of
         error -> {ok, State};
         {ok, BackendDef} -> http_init(State, BackendDef)
@@ -197,12 +200,12 @@ source_handle(#state{connections = ConnMap} = State,
         {ok, #conn{}} ->
             {ok, State}
     end;
-source_handle(#state{connections = ConnMap} = State,
+source_handle(#state{connections = ConnMap, min_packet_size = MinSize} = State,
               {gun_data, ConnPid, StreamRef, nofin, Data}) ->
     case maps:find(ConnPid, ConnMap) of
         error -> pass;
         {ok, Conn} ->
-            case conn_buffer_packet(Conn, Data, false) of
+            case conn_buffer_packet(Conn, MinSize, Data, false) of
                 {wait, Conn2}  ->
                     ConnMap2 = ConnMap#{ConnPid := Conn2},
                     {ok, State#state{connections = ConnMap2}};
@@ -211,12 +214,13 @@ source_handle(#state{connections = ConnMap} = State,
                     {data, StreamRef, Packet, State#state{connections = ConnMap2}}
             end
     end;
-source_handle(#state{connections = ConnMap} = State,
+source_handle(#state{connections = ConnMap, min_packet_size = MinSize} = State,
               {gun_data, ConnPid, StreamRef, fin, Data}) ->
     case maps:find(ConnPid, ConnMap) of
         error -> pass;
         {ok, Conn} ->
-            {packet, Packet, Conn2} = conn_buffer_packet(Conn, Data, true),
+            {packet, Packet, Conn2} =
+                conn_buffer_packet(Conn, MinSize, Data, true),
             ConnMap2 = ConnMap#{ConnPid := Conn2},
             {done, StreamRef, Packet, State#state{connections = ConnMap2}}
     end;
@@ -276,9 +280,10 @@ close_connection(#state{connections = ConnMap} = State, ConnPid) ->
             State#state{connections = ConnMap2}
     end.
 
-conn_buffer_packet(#conn{size = Size, data = Buff} = Conn, Data, IsFinal) ->
+conn_buffer_packet(#conn{size = Size, data = Buff} = Conn,
+                   MinPacketSize, Data, IsFinal) ->
     Size2 = Size + byte_size(Data),
-    case (Size >= ?MIN_PACKET_SIZE) or IsFinal of
+    case (Size >= MinPacketSize) or IsFinal of
         false ->
             {wait, Conn#conn{size = Size2, data = [Data | Buff]}};
         true ->
