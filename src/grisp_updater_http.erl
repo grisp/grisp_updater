@@ -277,6 +277,7 @@ http_connection_options(#state{callbacks = undefined} = State, Url) ->
     http_connection_options_default(State, Url);
 http_connection_options(#state{callbacks = {Mod, Sub}} = State, Url) ->
     try Mod:http_connection_options(Sub, Url) of
+        not_supported -> not_supported;
         {error, _Reason} = Error -> Error;
         {ok, Host2, Port2, Opts, Sub2} ->
             {ok, Host2, Port2, Opts, State#state{callbacks = {Mod, Sub2}}}
