@@ -85,6 +85,8 @@
 
 %--- Macros --------------------------------------------------------------------
 
+%FIXME: Should probably not be infinity
+-define(TIMEOUT, infinity).
 -define(SOURCE_CLOSE_DELAY, 1000).
 
 
@@ -94,13 +96,13 @@ start_link(Opts) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, Opts, []).
 
 load(Url, Path) ->
-    gen_server:call(?MODULE, {load, Url, Path}).
+    gen_server:call(?MODULE, {load, Url, Path}, ?TIMEOUT).
 
 stream(Url, Path, SinkMod, SinkParams) ->
-    gen_server:call(?MODULE, {stream, Url, Path, SinkMod, SinkParams}).
+    gen_server:call(?MODULE, {stream, Url, Path, SinkMod, SinkParams}, ?TIMEOUT).
 
 cancel(StreamRef) ->
-    gen_server:call(?MODULE, {cancel, StreamRef}).
+    gen_server:call(?MODULE, {cancel, StreamRef}, ?TIMEOUT).
 
 
 %--- Callbacks -----------------------------------------------------------------

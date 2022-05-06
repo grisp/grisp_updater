@@ -72,8 +72,9 @@
 
 %--- Macros --------------------------------------------------------------------
 
--define(CONNECTION_TIMEOUT, 5000).
 -define(DEFAULT_MIN_PACKET_SIZE, 1024 * 1024).
+-define(DEFAULT_CONNECT_TIMEOUT, 3000).
+-define(DEFAULT_WAITUP_TIMEOUT, 5000).
 
 
 %--- Utility Functions ---------------------------------------------------------
@@ -120,7 +121,7 @@ gun_connect(#state{connections = ConnMap} = State, Host, Port, Opts,
         {error, _Reason} = Error -> Error;
         {ok, ConnPid} ->
             MonRef = monitor(process, ConnPid),
-            case gun:await_up(ConnPid, ?CONNECTION_TIMEOUT, MonRef) of
+            case gun:await_up(ConnPid, ?DEFAULT_WAITUP_TIMEOUT, MonRef) of
                 {error, _Reason} = Error -> Error;
                 {ok, Protocol} ->
                     Conn2 = Conn#conn{
@@ -314,15 +315,16 @@ http_connection_options(#state{callbacks = {Mod, Sub}} = State, Url) ->
     end.
 
 http_connection_options_default(State, Url) ->
+    DefOpts = #{connect_timeout => ?DEFAULT_CONNECT_TIMEOUT},
     case uri_string:parse(Url) of
         #{scheme := <<"https">>, host := Host} = Parts ->
             Hostname = unicode:characters_to_list(Host),
             Port = maps:get(port, Parts, 443),
-            {ok, Hostname, Port, #{transport => tls}, State};
+            {ok, Hostname, Port, DefOpts#{transport => tls}, State};
         #{scheme := <<"http">>, host := Host} = Parts ->
             Hostname = unicode:characters_to_list(Host),
             Port = maps:get(port, Parts, 80),
-            {ok, Hostname, Port, #{}, State};
+            {ok, Hostname, Port, DefOpts, State};
         _ ->
             not_supported
     end.
