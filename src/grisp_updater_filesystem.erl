@@ -6,12 +6,14 @@
 %--- Includes ------------------------------------------------------------------
 
 -include_lib("kernel/include/logger.hrl").
+-include_lib("kernel/include/file.hrl").
 
 
 %--- Exports -------------------------------------------------------------------
 
 % Behaviour grisp_updater_storage callbacks
 -export([storage_init/1]).
+-export([storage_prepare/3]).
 -export([storage_open/2]).
 -export([storage_write/4]).
 -export([storage_read/4]).
@@ -24,6 +26,25 @@
 storage_init(_Opts) ->
     ?LOG_INFO("Initializing filesystem update storage", []),
     {ok, undefined}.
+
+storage_prepare(State, Device, Size) when is_binary(Device) ->
+    case file:read_file_info(Device) of
+        {ok, #file_info{type = device, access = read_write}} -> {ok, State};
+        {ok, #file_info{type = device}} -> {error, device_access_error};
+        {ok, #file_info{type = regular, access = read_write}} ->
+            case truncate_file(Device, Size) of
+                {error, _Reason} = Error -> Error;
+                ok -> {ok, State}
+            end;
+        {ok, #file_info{type = regular}} -> {error, device_access_error};
+        {ok, #file_info{}} -> {error, bad_device};
+        {error, enoent} ->
+            % Assume that if it doesn't exists it is a regular file
+            case truncate_file(Device, Size) of
+                {error, _Reason} = Error -> Error;
+                ok -> {ok, State}
+            end
+    end.
 
 storage_open(State, Device) when is_binary(Device) ->
     case file:open(Device, [raw, read, write, binary]) of
@@ -53,3 +74,20 @@ storage_close(State, Descriptor) ->
 storage_terminate(_State, _Reason) ->
     ?LOG_INFO("Terminating filesystem update storage", []),
     ok.
+
+
+%--- Internal Functions --------------------------------------------------------
+
+truncate_file(Filename, Size) ->
+    case file:open(Filename, [raw, read, write, binary]) of
+        {error, _Reason} = Error -> Error;
+        {ok, F} ->
+            try file:position(F, {bof, Size}) of
+                {error, _Reason} = Error -> Error;
+                {ok, _} ->
+                    file:truncate(F),
+                    ok
+            after
+                file:close(F)
+            end
+    end.

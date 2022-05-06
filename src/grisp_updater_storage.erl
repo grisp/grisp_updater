@@ -12,6 +12,9 @@
 
 -callback storage_init(Opts :: map()) ->
     {ok, State :: term()} | {error, term()}.
+-callback storage_prepare(State :: term(), Device :: binary(),
+                          Size :: non_neg_integer()) ->
+    ok | {error, term()}.
 -callback storage_open(State :: term(), Device :: binary()) ->
     {ok, Descriptor :: term(), State :: term()} | {error, term()}.
 -callback storage_write(State :: term(), Descriptor :: term(),
@@ -31,6 +34,7 @@
 % API
 -export([start_link/1]).
 -export([digest/4]).
+-export([prepare/2]).
 -export([read/3]).
 -export([write/3]).
 
@@ -61,6 +65,9 @@
 start_link(Opts) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, Opts, []).
 
+prepare(Device, Size) ->
+    gen_server:call(?MODULE, {prepare, Device, Size}, ?TIMEOUT).
+
 digest(Type, Device, Seek, Size) ->
     gen_server:call(?MODULE, {digest, Type, Device, Seek, Size}, ?TIMEOUT).
 
@@ -77,6 +84,11 @@ init(#{backend := {Mod, Opts}}) when is_atom(Mod), is_map(Opts) ->
     ?LOG_INFO("Starting update storage from ~s...", [Mod]),
     storage_init(#state{}, Mod, Opts).
 
+handle_call({prepare, Device, Size}, _From, State) ->
+    case storage_prepare(State, Device, Size) of
+        {ok, State2} -> {reply, ok, State2};
+        {error, Reason} -> {reply, {error, Reason}, State}
+    end;
 handle_call({digest, Type, Device, Seek, Size}, _From, State) ->
     case do_digest(State, Type, Device, Seek, Size) of
         {ok, Digest, State2} -> {reply, {ok, Digest}, State2};
@@ -188,6 +200,13 @@ storage_init(#state{storage = undefined} = State, Mod, Opts) ->
     case Mod:storage_init(Opts) of
         {error, _Reason} = Error -> Error;
         {ok, Sub} -> {ok, State#state{storage = {Mod, Sub}}}
+    end.
+
+storage_prepare(#state{storage = {Mod, Sub}} = State, Device, Size) ->
+    case Mod:storage_prepare(Sub, Device, Size) of
+        {error, _Reason} = Error -> Error;
+        {ok, Sub2} ->
+            {ok, State#state{storage = {Mod, Sub2}}}
     end.
 
 storage_open(#state{storage = {Mod, Sub}} = State, Device) ->

@@ -192,7 +192,7 @@ updating(cast, {loader_error, BlockId, Reason}, Data) ->
 updating(internal, bootstrap, Data) ->
     case bootstrap_object(Data) of
         {ok, Data2} -> {keep_state, Data2, []};
-        {error, _Reason} -> {next_state, ready, Data}
+        {done, Data2} -> {next_state, ready, Data2}
     end;
 updating(EventType, Event, Data) ->
     handle_event(EventType, Event, updating, Data).
@@ -365,15 +365,20 @@ bootstrap_object(#data{update = #update{objects = [Obj | _],
             Error
     end.
 
-
-bootstrap_object(Data, Up, ObjTarget, Blocks) ->
-    Pending = lists:foldl(fun(#block{id = Id} = B, Map) ->
-        grisp_updater_checker:schedule_check(B, ObjTarget),
-        Map#{Id => #pending{status = checking, block = B,
-                            target = ObjTarget}}
-    end, #{}, Blocks),
-    Up2 = Up#update{pending = Pending},
-    {ok, Data#data{update = Up2}}.
+bootstrap_object(Data, Up, #target{device = Device} = ObjTarget, Blocks) ->
+    Total = lists:foldl(fun(#block{data_size = S}, T) -> T + S end, 0, Blocks),
+    case grisp_updater_storage:prepare(Device, Total) of
+        {error, Reason} ->
+            update_failed(Data, Reason);
+        ok ->
+            Pending = lists:foldl(fun(#block{id = Id} = B, Map) ->
+                grisp_updater_checker:schedule_check(B, ObjTarget),
+                Map#{Id => #pending{status = checking, block = B,
+                                    target = ObjTarget}}
+            end, #{}, Blocks),
+            Up2 = Up#update{pending = Pending},
+            {ok, Data#data{update = Up2}}
+    end.
 
 bootstrap_next_object(#data{update = #update{objects = [Obj],
                                              pending = Pending}} = Data)
