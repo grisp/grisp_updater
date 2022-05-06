@@ -181,8 +181,6 @@ parse_objects([{Type, Props} | Rem], I, Stack, Opts, Acc, C, D, B) ->
             parse_objects(Rem, I + 1, Stack, Opts,
                           [Obj | Acc], C + Co, D + Do, B + Bo)
     end;
-parse_objects([{T, _} | _], I, Stack, _Opts, _Acc, _C, _D, _B) ->
-    throw({bad_manifest, {bad_object_type, lists:reverse([I | Stack]), T}});
 parse_objects(_, I, Stack, _Opts, _Acc, _C, _D, _B) ->
     throw({bad_manifest, {bad_object, lists:reverse([I | Stack])}}).
 
