@@ -64,7 +64,8 @@
 
 -record(data, {
     system :: undefined | {Mod :: module(), Sub :: term()},
-    update :: undefined | #update{}
+    update :: undefined | #update{},
+    last_outcome :: undefined | {success, grisp_updater_progress:statistics()} | {error, term()}
 }).
 
 
@@ -144,6 +145,12 @@ ready({call, From}, validate, Data) ->
             ?LOG_INFO("Running system validated", []),
             {keep_state, Data2, [{reply, From, ok}]}
     end;
+ready({call, From}, get_status,
+      #data{update = undefined, last_outcome = undefined}) ->
+    {keep_state_and_data, [{reply, From, ready}]};
+ready({call, From}, get_status,
+      #data{update = undefined, last_outcome = LastOutcome}) ->
+    {keep_state_and_data, [{reply, From, LastOutcome}]};
 ready(EventType, Event, Data) ->
     handle_event(EventType, Event, ready, Data).
 
@@ -154,6 +161,9 @@ updating({call, From}, cancel_update, _Data) ->
     {keep_state_and_data, [{reply, From, {error, not_implemented}}]};
 updating({call, From}, validate, _Data) ->
     {keep_state_and_data, [{reply, From, {error, updating}}]};
+updating({call, From}, get_status,
+      #data{update = #update{stats = Stats}}) ->
+    {keep_state_and_data, [{reply, From, {updating, Stats}}]};
 updating(cast, {checker_done, BlockId, Outcome}, Data) ->
     case got_checker_done(Data, BlockId, Outcome) of
         {ok, Data2} -> {keep_state, Data2};
@@ -194,8 +204,12 @@ terminate(Reason, _State, Data) ->
 
 %--- Internal Functions --------------------------------------------------------
 
-handle_event({call, From}, get_status, State, _Data) ->
+handle_event({call, From}, get_status, State,
+             #data{update = undefined}) ->
     {keep_state_and_data, [{reply, From, State}]};
+handle_event({call, From}, get_status, State,
+             #data{update = #update{stats = Stats}}) ->
+    {keep_state_and_data, [{reply, From, {State, Stats}}]};
 handle_event({call, From}, Msg, _State, _Data) ->
     ?LOG_WARNING("Unexpected call from ~p: ~p", [Msg]),
     {keep_state_and_data, [{reply, From, {error, unexpected_call}}]};
@@ -550,7 +564,8 @@ update_done(#data{update = Up} = Data) ->
     case system_set_updated(Data, SysId) of
         {ok, Data2}  ->
             progress_done(Up, Stats),
-            {done, Data2#data{update = undefined}};
+            {done, Data2#data{update = undefined,
+                              last_outcome = {success, Stats}}};
         {error, Reason} ->
             ?LOG_INFO("Failed to mark system ~w as updated: ~p",
                       [SysId, Reason]),
@@ -562,7 +577,7 @@ update_failed(#data{update = #update{stats = Stats} = Up} = Data, Reason) ->
     grisp_updater_checker:abort(),
     grisp_updater_loader:abort(),
     progress_error(Up, Stats, Reason),
-    {done, Data#data{update = undefined}}.
+    {done, Data#data{update = undefined, last_outcome = {error, Reason}}}.
 
 object_name(#object{product = Name}) when Name =/= undefined -> Name;
 object_name(#object{type = Name}) when Name =/= undefined -> Name.
@@ -642,20 +657,28 @@ system_terminate(#data{system = {Mod, Sub}}, Reason) ->
 
 %--- Progress Callbacks Handling
 
+progress_init(#update{progress = undefined} = Up, undefined, _Opts) ->
+    {ok, Up};
 progress_init(#update{progress = undefined} = Up, Mod, Opts) ->
     case Mod:progress_init(Opts) of
         {ok, Sub} -> {ok, Up#update{progress = {Mod, Sub}}};
         {error, _Reason} = Error -> Error
     end.
 
+progress_update(#update{progress = undefined}, _Stats) ->
+    ok;
 progress_update(#update{progress = {Mod, Params}}, Stats) ->
     Mod:progress_update(Params, Stats).
 
 % progress_warning(#update{progress = {Mod, Params}}, Msg, Reason) ->
 %     Mod:progress_warning(Params, Msg, Reason).
 
+progress_error(#update{progress = undefined}, _Stats, _Reason) ->
+    ok;
 progress_error(#update{progress = {Mod, Params}}, Stats, Reason) ->
     Mod:progress_error(Params, Stats, Reason).
 
+progress_done(#update{progress = undefined}, _Stats) ->
+    ok;
 progress_done(#update{progress = {Mod, Params}}, Stats) ->
     Mod:progress_done(Params, Stats).

@@ -6,6 +6,7 @@
 % API functions
 -export([update/1, update/2]).
 -export([start/3, start/4]).
+-export([status/0]).
 -export([cancel/0]).
 -export([validate/0]).
 
@@ -23,6 +24,9 @@ start(Url, Callbacks, Params) ->
 
 start(Url, Callbacks, Params, Opts) ->
     grisp_updater_manager:start_update(Url, Callbacks, Params, Opts).
+
+status() ->
+    grisp_updater_manager:get_status().
 
 cancel() ->
     grisp_updater_manager:cancel_update().
