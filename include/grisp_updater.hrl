@@ -48,7 +48,7 @@
 -type target_spec() :: #raw_target_spec{} | #file_target_spec{}.
 
 -record(object, {
-    type :: bootloader | kernel | rootfs,
+    type :: atom(),
     product :: undefined | binary(),
     version :: undefined | binary(),
     desc :: undefined | binary(),

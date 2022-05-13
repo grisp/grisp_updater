@@ -32,7 +32,13 @@
     {ok, State :: term()} | {error, term()}.
 -callback system_validate(State :: term()) ->
     {ok, State :: term()} | {error, term()}.
+-callback system_object_updated(State :: term(), Object :: #object{},
+                                Target :: #target{}) ->
+    {ok, State :: term()} | {error, term()}.
+-callback system_updated(State :: term()) ->
+    {ok, State :: term()} | {error, term()}.
 -callback system_terminate(State :: term(), Reason :: term()) ->
     ok.
 
--optional_callbacks([system_get_updatable/1, system_prepare_target/4]).
+-optional_callbacks([system_get_updatable/1, system_prepare_target/4,
+                     system_object_updated/3, system_updated/1]).

@@ -59,6 +59,7 @@
     system_id :: undefined | non_neg_integer(),
     system_target :: undefined | target(),
     objects :: undefined | [#object{}],
+    target :: undefined | #target{},
     pending :: undefined | #{integer() => #pending{}}
 }).
 
@@ -376,15 +377,20 @@ bootstrap_object(Data, Up, #target{device = Device} = ObjTarget, Blocks) ->
                 Map#{Id => #pending{status = checking, block = B,
                                     target = ObjTarget}}
             end, #{}, Blocks),
-            Up2 = Up#update{pending = Pending},
+            Up2 = Up#update{target = ObjTarget, pending = Pending},
             {ok, Data#data{update = Up2}}
     end.
 
 bootstrap_next_object(#data{update = #update{objects = [Obj],
                                              pending = Pending}} = Data)
   when map_size(Pending) =:= 0 ->
-    ?LOG_INFO("Done updating ~s", [object_name(Obj)]),
-    update_done(Data);
+    case system_updated(Data) of
+        {ok, Data2} ->
+            ?LOG_INFO("Done updating ~s", [object_name(Obj)]),
+            update_done(Data2);
+        {error, Reason} ->
+            update_failed(Data, Reason)
+    end;
 bootstrap_next_object(#data{update = #update{objects = [Last | Objs],
                                              pending = Pending} = Up} = Data)
   when map_size(Pending) =:= 0 ->
@@ -403,7 +409,7 @@ got_checker_done(#data{update = #update{pending = Map} = Up} = Data, BlockId, tr
             Data2 = Data#data{update = Up#update{pending = Map2}},
             Data3 = stats_block_checked(Data2, Block, false),
             case map_size(Map2) of
-                0 -> bootstrap_next_object(Data3);
+                0 -> object_updated(Data3);
                 _ -> {ok, Data3}
             end;
         {#pending{status = Status}, Map2} ->
@@ -431,6 +437,13 @@ got_checker_done(#data{update = Up} = Data, BlockId, false) ->
             ?LOG_WARNING("Received checker failed outcome for unexpected block ~w currently ~w",
                          [BlockId, Status]),
             {ok, Data}
+    end.
+
+object_updated(#data{update = Up} = Data) ->
+    #update{objects = [Object | _], target = Target} = Up,
+    case system_object_updated(Data, Object, Target) of
+        {ok, Data2} -> bootstrap_next_object(Data2);
+        {error, Reason} -> update_failed(Data, Reason)
     end.
 
 got_checker_error(#data{update = #update{pending = Map}} = Data, BlockId, Reason) ->
@@ -654,6 +667,22 @@ system_validate(#data{system = {Mod, Sub}} = Data) ->
     case Mod:system_validate(Sub) of
         {error, _Reason} = Error -> Error;
         {ok, Sub2} -> {ok, Data#data{system = {Mod, Sub2}}}
+    end.
+
+system_object_updated(#data{system = {Mod, Sub}} = Data, Object, Target) ->
+    try Mod:system_object_updated(Sub, Object, Target) of
+        {error, _Reason} = Error -> Error;
+        {ok, Sub2} -> {ok, Data#data{system = {Mod, Sub2}}}
+    catch
+        error:undef -> {ok, Data}
+    end.
+
+system_updated(#data{system = {Mod, Sub}} = Data) ->
+    try Mod:system_updated(Sub) of
+        {error, _Reason} = Error -> Error;
+        {ok, Sub2} -> {ok, Data#data{system = {Mod, Sub2}}}
+    catch
+        error:undef -> {ok, Data}
     end.
 
 system_terminate(#data{system = {Mod, Sub}}, Reason) ->
