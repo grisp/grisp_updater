@@ -164,12 +164,18 @@ start_streams(#state{concurrency = Concurrency, streams = StreamMap,
             end
     end.
 
+block_ref(BaseUrl, Block) ->
+    Path = block_path(Block),
+    case uri_string:parse(Path) of
+        #{scheme := _} -> {Path, <<>>};
+        #{} -> {BaseUrl, Path}
+    end.
+
 start_stream(#state{pending = PendMap, streams = StreamMap} = State, Id) ->
     #{Id := #pending{url = Url, block = Block} = Pending} = PendMap,
-    Path = block_path(Block),
-    ?LOG_DEBUG("Start streaming block ~b from ~s/~s", [Id, Url, Path]),
-
-    case grisp_updater_source:stream(Url, Path, ?MODULE, Id) of
+    {BlockUrl, BlockPath} = block_ref(Url, Block),
+    ?LOG_DEBUG("Start streaming block ~b from ~s/~s", [Id, BlockUrl, BlockPath]),
+    case grisp_updater_source:stream(BlockUrl, BlockPath, ?MODULE, Id) of
         {error, Reason} ->
             grisp_updater_manager:loader_failed(Id, Reason),
             State#state{pending = maps:remove(Id, PendMap)};
