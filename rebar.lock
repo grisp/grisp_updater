@@ -2,6 +2,10 @@
 [{<<"cowlib">>,{pkg,<<"cowlib">>,<<"2.7.3">>},1},
  {<<"gun">>,{pkg,<<"gun">>,<<"1.3.3">>},0},
  {<<"quickrand">>,{pkg,<<"quickrand">>,<<"2.0.4">>},1},
+ {<<"termseal">>,
+  {git,"https://github.com/grisp/termseal.git",
+       {ref,"e1d9afc0f47a13073cfca31af4a4ffb3a86e0bc1"}},
+  0},
  {<<"uuid">>,{pkg,<<"uuid_erl">>,<<"2.0.4">>},0}]}.
 [
 {pkg_hash,[

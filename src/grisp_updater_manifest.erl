@@ -8,12 +8,13 @@
 %--- Exports -------------------------------------------------------------------
 
 % API Functions
--export([parse/2]).
+-export([parse_data/2]).
+-export([parse_term/2]).
 
 
 %--- API Functions -------------------------------------------------------------
 
-parse(Data, Opts) ->
+parse_data(Data, Opts) ->
     try
         Encoding = case epp:read_encoding_from_binary(Data) of
             none -> latin1;
@@ -33,6 +34,13 @@ parse(Data, Opts) ->
                         end
                 end
         end
+    catch
+        throw:Reason -> {error, Reason}
+    end.
+
+parse_term(Term, Opts) ->
+    try
+        {ok, parse_manifest(Term, [], Opts)}
     catch
         throw:Reason -> {error, Reason}
     end.

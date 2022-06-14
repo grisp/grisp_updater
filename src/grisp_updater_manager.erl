@@ -64,6 +64,8 @@
 }).
 
 -record(data, {
+    sig_check = false :: boolean,
+    sig_certs = [] :: [term()],
     system :: undefined | {Mod :: module(), Sub :: term()},
     update :: undefined | #update{},
     last_outcome :: undefined | {success, grisp_updater_progress:statistics()} | {error, term()}
@@ -120,9 +122,30 @@ callback_mode() -> state_functions.
 
 init(#{system := SysOpts}) ->
     ?LOG_INFO("Starting GRiSP update manager..."),
-    case system_init(#data{}, SysOpts) of
-        {error, _Reason} = Error -> Error;
-        {ok, Data} -> {ok, ready, Data, []}
+    SigCheck = application:get_env(grisp_updater, signature_check, false),
+    {SigCerts, SigCertErrors} =
+        grisp_updater_tools:config_certificates(grisp_updater,
+                                signature_certificates, "*.{crt,cer,pem}"),
+    lists:foreach(fun
+        ({priv_not_found, AppName}) ->
+            ?LOG_WARNING("Application ~s priv directory not found", [AppName]);
+        ({invalid_file_or_directory, Path}) ->
+            ?LOG_WARNING("Invalid certificate file or directory: ~s", [Path]);
+        ({read_error, Reason, Path}) ->
+            ?LOG_WARNING("Failed to read manifest certificates from ~s (~p)", [Path, Reason]);
+        (Reason) ->
+            ?LOG_WARNING("Error loading some manifest certificate: ~p", [Reason])
+    end, SigCertErrors),
+    case {SigCheck, SigCerts} of
+        {true, []} ->
+            ?LOG_ERROR("Manifest signature enabled but no certificate specified"),
+            {error, missing_signature_certificate};
+        _ ->
+            Data = #data{sig_check = SigCheck, sig_certs = SigCerts},
+            case system_init(Data, SysOpts) of
+                {error, _Reason} = Error -> Error;
+                {ok, Data2} -> {ok, ready, Data2, []}
+            end
     end.
 
 ready({call, From}, {start_update, Url, Callbacks, Params, Opts}, Data) ->
@@ -226,10 +249,10 @@ start_update(Data, Url, Mod, Params, Opts) ->
         {error, _Reason} = Error -> Error;
         {ok, Up} ->
             Data2 = Data#data{update = Up},
-            case grisp_updater_source:load(Url, <<"MANIFEST">>) of
+            case grisp_updater_source:load(Url, <<"MANIFEST.sealed">>) of
                 {error, _Reason} = Error -> Error;
                 {ok, Bin} ->
-                    case grisp_updater_manifest:parse(Bin, Opts) of
+                    case open_manifest(Data, Bin, Opts) of
                         {error, _Reason} = Error -> Error;
                         {ok, #manifest{objects = []}} ->
                             update_done(Data2);
@@ -237,6 +260,30 @@ start_update(Data, Url, Mod, Params, Opts) ->
                             do_start_update(Data2, Manifest)
                     end
             end
+    end.
+
+open_manifest(#data{sig_check = false, sig_certs = Certs}, Box, Opts) ->
+    UnsealOpts = #{allow_unsigned => true, allow_bad_signature => true},
+    try termseal:unseal(Box, Certs, UnsealOpts) of
+        {unsigned, Manifest} ->
+            ?LOG_INFO("Loading UNSIGNED manifest"),
+            grisp_updater_manifest:parse_term(Manifest, Opts);
+        {verified, Manifest} ->
+            ?LOG_INFO("Loading VERIFIED manifest"),
+            grisp_updater_manifest:parse_term(Manifest, Opts);
+        {bad_signature, Manifest} ->
+            ?LOG_INFO("Manifest SIGNATURE CHECK FAILED, loading anyway"),
+            grisp_updater_manifest:parse_term(Manifest, Opts)
+    catch
+        Reason -> {error, Reason}
+    end;
+open_manifest(#data{sig_check = true, sig_certs = Certs}, Box, Opts) ->
+    try termseal:unseal(Box, Certs, #{}) of
+        {verified, Manifest} ->
+            ?LOG_INFO("Loading VERIFIED manifest"),
+            grisp_updater_manifest:parse_term(Manifest, Opts)
+    catch
+        Reason -> {error, Reason}
     end.
 
 do_start_update(#data{update = Up} = Data,
