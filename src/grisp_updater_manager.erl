@@ -473,7 +473,7 @@ got_loader_done(#data{update = #update{pending = Map} = Up} = Data, BlockId) ->
             Data2 = Data#data{update = Up#update{pending = Map2}},
             Data3 = stats_block_loaded(Data2, Block),
             case map_size(Map2) of
-                0 -> bootstrap_next_object(Data3);
+                0 -> object_updated(Data3);
                 _ -> {ok, Data3}
             end;
         {#pending{status = Status}, Map2} ->
