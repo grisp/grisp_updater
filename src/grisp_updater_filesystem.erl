@@ -47,7 +47,7 @@ storage_prepare(State, Device, Size) when is_binary(Device) ->
     end.
 
 storage_open(State, Device) when is_binary(Device) ->
-    case file:open(Device, [raw, read, write, binary]) of
+    case file:open(Device, [raw, read, write, binary, sync]) of
         {ok, File} -> {ok, File, State};
         {error, _Reason} = Error -> Error
     end;
@@ -79,7 +79,7 @@ storage_terminate(_State, _Reason) ->
 %--- Internal Functions --------------------------------------------------------
 
 truncate_file(Filename, Size) ->
-    case file:open(Filename, [raw, read, write, binary]) of
+    case file:open(Filename, [raw, read, write, binary, sync]) of
         {error, _Reason} = Error -> Error;
         {ok, F} ->
             try file:position(F, {bof, Size}) of
