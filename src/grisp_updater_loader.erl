@@ -187,6 +187,12 @@ start_stream(#state{pending = PendMap, streams = StreamMap} = State, Id) ->
             State#state{pending = PendMap2, streams = StreamMap2}
     end.
 
+got_sink_error(State, _StreamRef, Id, {http_error, Code} = Reason)
+  when 400 =< Code, Code < 500 ->
+    % all 4xx http error codes (client errors)
+    % imply that the request should not be repeated
+    grisp_updater_manager:loader_error(Id, Reason),
+    State;
 got_sink_error(#state{pending = PendMap, streams = StreamMap} = State,
                StreamRef, Id, Reason) ->
     %TODO: Figure out which errors are fatal and which are recoverable

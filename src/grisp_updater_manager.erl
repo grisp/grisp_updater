@@ -533,18 +533,24 @@ got_loader_done(#data{update = #update{pending = Map} = Up} = Data, BlockId) ->
 got_loader_failed(#data{update = Up} = Data, BlockId, Reason) ->
     ?LOG_DEBUG("Block ~b loading failed: ~p", [BlockId, Reason]),
     #update{url = Url, pending = Map} = Up,
+    MaxRetry = application:get_env(grisp_updater, retry, 100),
     case maps:find(BlockId, Map) of
         error ->
             ?LOG_WARNING("Received loader error for unknown block ~w",
                          [BlockId]),
             {ok, Data};
-        {ok, #pending{status = loading, retry = Retry} = Pending} ->
+        {ok, #pending{status = loading, retry = Retry} = Pending}
+          when Retry < MaxRetry ->
             #pending{block = Block, target = Target} = Pending,
             Pending2 = Pending#pending{retry = Retry + 1},
             Map2 = Map#{BlockId := Pending2},
             Data2 = Data#data{update = Up#update{pending = Map2}},
             grisp_updater_loader:schedule_load(Url, Block, Target),
             {ok, stats_block_retried(Data2)};
+        {ok, #pending{status = loading}} ->
+            ?LOG_ERROR("Received loader error for block ~w exceeded retries",
+                       [BlockId]),
+            update_failed(Data, {exceeded_retries, Reason});
         {ok, #pending{status = Status}} ->
             ?LOG_WARNING("Received loader error for unexpected block ~w currently ~w",
                          [BlockId, Status]),
