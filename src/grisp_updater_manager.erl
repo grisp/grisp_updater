@@ -599,8 +599,8 @@ stats_block_checked(#data{update = #update{stats = Stats} = Up} = Data,
         false -> Stats2#{data_skipped := Ds + Size}
     end,
     Up2 = Up#update{stats = Stats3},
-    progress_update(Up2, Stats3),
-    Data#data{update = Up2}.
+    {ok, Up3} = progress_update(Up2, Stats3),
+    Data#data{update = Up3}.
 
 stats_block_loaded(#data{update = #update{stats = Stats} = Up} = Data,
                    #block{data_size = DataSize, encoding = Encoding}) ->
@@ -617,15 +617,15 @@ stats_block_loaded(#data{update = #update{stats = Stats} = Up} = Data,
         data_written := Dw + DataSize
     },
     Up2 = Up#update{stats = Stats2},
-    progress_update(Up2, Stats2),
-    Data#data{update = Up2}.
+    {ok, Up3} = progress_update(Up2, Stats2),
+    Data#data{update = Up3}.
 
 stats_block_retried(#data{update = #update{stats = Stats} = Up} = Data) ->
     #{blocks_retries := Br} = Stats,
     Stats2 = Stats#{blocks_retries := Br + 1},
     Up2 = Up#update{stats = Stats2},
-    progress_update(Up2, Stats2),
-    Data#data{update = Up2}.
+    {ok, Up3} = progress_update(Up2, Stats2),
+    Data#data{update = Up3}.
 
 update_done(#data{update = Up} = Data) ->
     #update{stats = Stats, system_id = SysId} = Up,
@@ -752,10 +752,11 @@ progress_init(#update{progress = undefined} = Up, Mod, Opts) ->
         {error, _Reason} = Error -> Error
     end.
 
-progress_update(#update{progress = undefined}, _Stats) ->
-    ok;
-progress_update(#update{progress = {Mod, Params}}, Stats) ->
-    Mod:progress_update(Params, Stats).
+progress_update(#update{progress = undefined} = Up, _Stats) ->
+    {ok, Up};
+progress_update(#update{progress = {Mod, Params}} = Up, Stats) ->
+    {ok, Sub} = Mod:progress_update(Params, Stats),
+    {ok, Up#update{progress = {Mod, Sub}}}.
 
 % progress_warning(#update{progress = {Mod, Params}}, Msg, Reason) ->
 %     Mod:progress_warning(Params, Msg, Reason).
