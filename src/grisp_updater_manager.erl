@@ -121,7 +121,7 @@ loader_error(BlockId, Reason) ->
 callback_mode() -> state_functions.
 
 init(#{system := SysOpts}) ->
-    ?LOG_INFO("Starting GRiSP update manager..."),
+    ?LOG_INFO("Starting GRiSP update manager ..."),
     SigCheck = application:get_env(grisp_updater, signature_check, false),
     {SigCerts, SigCertErrors} =
         grisp_updater_tools:config_certificates(grisp_updater,

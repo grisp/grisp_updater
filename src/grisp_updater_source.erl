@@ -108,7 +108,7 @@ cancel(StreamRef) ->
 %--- Callbacks -----------------------------------------------------------------
 
 init(#{backends := Backends})  ->
-    ?LOG_INFO("Starting update source...", []),
+    ?LOG_INFO("Starting update source ...", []),
     source_init(#state{}, Backends).
 
 handle_call({load, Url, Path}, From, State) ->
