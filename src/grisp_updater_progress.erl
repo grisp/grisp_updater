@@ -95,7 +95,7 @@ progress_update(#state{last_log = LastLog} = State, Stats) ->
         false -> {ok, State};
         true ->
             ?LOG_INFO("Update progress: ~b%", [progress_percent(Stats)]),
-            {ok, #state{last_log = erlang:system_time(millisecond)}}
+            {ok, State#state{last_log = erlang:system_time(millisecond)}}
     end.
 
 progress_warning(State, Msg, Reason) ->
