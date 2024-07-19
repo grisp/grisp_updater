@@ -29,7 +29,7 @@
 %--- Behaviour grisp_updater_source Callbacks ----------------------------------
 
 source_init(_Opts) ->
-    ?LOG_INFO("Initializing tarball update source", []),
+    ?LOG_INFO("Initializing GRiSP updater's tarball source", []),
     {ok, #state{}}.
 
 source_open(#state{files = Files} = State, Url, _Opts) ->

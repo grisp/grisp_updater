@@ -39,7 +39,7 @@
 %--- Behaviour grisp_updater_source Callback -----------------------------------
 
 system_init(Opts) ->
-    ?LOG_INFO("Initializing dummy update system interface", []),
+    ?LOG_INFO("Initializing GRiSP updater's dummy system interface", []),
     DeviceFile = case maps:find(device_file, Opts) of
         {ok, F} when is_list(F); is_binary(F) -> F;
         error ->

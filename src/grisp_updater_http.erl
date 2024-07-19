@@ -96,7 +96,7 @@ join_http_path(Base, Path) ->
 %--- Behaviour grisp_updater_source Callbacks ----------------------------------
 
 source_init(Opts) ->
-    ?LOG_INFO("Initializing HTTP update source", []),
+    ?LOG_INFO("Initializing GRiSP updater's HTTP source", []),
     State = #state{
         min_packet_size = maps:get(min_packet_size, Opts,
                                    ?DEFAULT_MIN_PACKET_SIZE)

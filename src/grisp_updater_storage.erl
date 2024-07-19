@@ -81,7 +81,7 @@ write(Device, Seek, Data) ->
 %--- Callbacks -----------------------------------------------------------------
 
 init(#{backend := {Mod, Opts}}) when is_atom(Mod), is_map(Opts) ->
-    ?LOG_INFO("Starting update storage from ~p ...", [Mod]),
+    ?LOG_INFO("Starting GRiSP updater's storage from ~p ...", [Mod]),
     storage_init(#state{}, Mod, Opts).
 
 handle_call({prepare, Device, Size}, _From, State) ->

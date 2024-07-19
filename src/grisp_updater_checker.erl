@@ -62,7 +62,7 @@ abort() ->
 %--- Callbacks -----------------------------------------------------------------
 
 init(_Opts) ->
-    ?LOG_INFO("Starting GRiSP block checker ..."),
+    ?LOG_INFO("Starting GRiSP updater's block checker ..."),
     {ok, #state{}}.
 
 handle_call(abort, _From, State) ->

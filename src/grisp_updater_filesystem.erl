@@ -24,7 +24,7 @@
 %--- Behaviour grisp_updater_storage Callbacks ---------------------------------
 
 storage_init(_Opts) ->
-    ?LOG_INFO("Initializing filesystem update storage", []),
+    ?LOG_INFO("Initializing GRiSP updater's filesystem storage", []),
     {ok, undefined}.
 
 storage_prepare(State, Device, Size) when is_binary(Device) ->

@@ -95,7 +95,7 @@ sink_done(StreamRef, Params, Data) ->
 %--- Behaviour gen_server Callbacks --------------------------------------------
 
 init(Opts) ->
-    ?LOG_INFO("Starting GRiSP block loader ..."),
+    ?LOG_INFO("Starting GRiSP updater's block loader ..."),
     {ok, #state{
         concurrency = maps:get(concurrency, Opts, ?DEFAULT_CONCURRENCY)
     }}.
