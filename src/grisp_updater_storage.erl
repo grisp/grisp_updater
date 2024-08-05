@@ -7,13 +7,15 @@
 
 -include_lib("kernel/include/logger.hrl").
 
+-include("grisp_updater.hrl").
+
 
 %--- Behaviour Definition ------------------------------------------------------
 
 -callback storage_init(Opts :: map()) ->
     {ok, State :: term()} | {error, term()}.
--callback storage_prepare(State :: term(), Device :: binary(),
-                          Size :: non_neg_integer()) ->
+-callback storage_prepare(State :: term(), Target :: target(),
+                          ObjSize :: non_neg_integer()) ->
     ok | {error, term()}.
 -callback storage_open(State :: term(), Device :: binary()) ->
     {ok, Descriptor :: term(), State :: term()} | {error, term()}.
@@ -65,8 +67,8 @@
 start_link(Opts) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, Opts, []).
 
-prepare(Device, Size) ->
-    gen_server:call(?MODULE, {prepare, Device, Size}, ?TIMEOUT).
+prepare(Target, ObjSize) ->
+    gen_server:call(?MODULE, {prepare, Target, ObjSize}, ?TIMEOUT).
 
 digest(Type, Device, Seek, Size) ->
     gen_server:call(?MODULE, {digest, Type, Device, Seek, Size}, ?TIMEOUT).
@@ -84,8 +86,8 @@ init(#{backend := {Mod, Opts}}) when is_atom(Mod), is_map(Opts) ->
     ?LOG_INFO("Starting GRiSP updater's storage from ~p ...", [Mod]),
     storage_init(#state{}, Mod, Opts).
 
-handle_call({prepare, Device, Size}, _From, State) ->
-    case storage_prepare(State, Device, Size) of
+handle_call({prepare, Target, ObjSize}, _From, State) ->
+    case storage_prepare(State, Target, ObjSize) of
         {ok, State2} -> {reply, ok, State2};
         {error, Reason} -> {reply, {error, Reason}, State}
     end;
@@ -202,8 +204,8 @@ storage_init(#state{storage = undefined} = State, Mod, Opts) ->
         {ok, Sub} -> {ok, State#state{storage = {Mod, Sub}}}
     end.
 
-storage_prepare(#state{storage = {Mod, Sub}} = State, Device, Size) ->
-    case Mod:storage_prepare(Sub, Device, Size) of
+storage_prepare(#state{storage = {Mod, Sub}} = State, Target, ObjSize) ->
+    case Mod:storage_prepare(Sub, Target, ObjSize) of
         {error, _Reason} = Error -> Error;
         {ok, Sub2} ->
             {ok, State#state{storage = {Mod, Sub2}}}

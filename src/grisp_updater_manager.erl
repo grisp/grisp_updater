@@ -14,6 +14,7 @@
 
 % API Functions
 -export([start_link/1]).
+-export([get_info/0, get_info/1]).
 -export([get_status/0]).
 -export([update/2]).
 -export([start_update/4]).
@@ -64,7 +65,7 @@
 }).
 
 -record(data, {
-    sig_check = false :: boolean,
+    sig_check = true :: boolean(),
     sig_certs = [] :: [term()],
     system :: undefined | {Mod :: module(), Sub :: term()},
     update :: undefined | #update{},
@@ -76,6 +77,12 @@
 
 start_link(Opts) ->
     gen_statem:start_link({local, ?MODULE}, ?MODULE, Opts, []).
+
+get_info() ->
+    gen_statem:call(?MODULE, get_info).
+
+get_info(Url) ->
+    gen_statem:call(?MODULE, {get_info, Url}).
 
 get_status() ->
     gen_statem:call(?MODULE, get_status).
@@ -169,6 +176,12 @@ ready({call, From}, validate, Data) ->
             ?LOG_INFO("Running system validated", []),
             {keep_state, Data2, [{reply, From, ok}]}
     end;
+ready({call, From}, get_info, Data) ->
+    Result = get_local_info(Data),
+    {keep_state_and_data, [{reply, From, Result}]};
+ready({call, From}, {get_info, Url}, Data) ->
+    Result = get_update_info(Data, Url),
+    {keep_state_and_data, [{reply, From, Result}]};
 ready({call, From}, get_status,
       #data{update = undefined, last_outcome = undefined}) ->
     {keep_state_and_data, [{reply, From, ready}]};
@@ -228,6 +241,43 @@ terminate(Reason, _State, Data) ->
 
 %--- Internal Functions --------------------------------------------------------
 
+format_system_info(removable) ->
+    #{type => removable};
+format_system_info(SysId) when SysId >= 0, SysId =< 1 ->
+    #{type => system, id => SysId}.
+
+get_local_info(Data) ->
+    {BootSys, ValidSys, NextSys} = system_get_systems(Data),
+    Info = #{
+        boot => format_system_info(BootSys),
+        valid => format_system_info(ValidSys),
+        next => format_system_info(NextSys),
+        target => undefined,
+        update => undefined
+    },
+    case system_get_updatable(Data) of
+        {ok, TargetSys, _Target} ->
+            Info#{target => format_system_info(TargetSys)};
+        _ ->
+            Info#{target => undefined}
+    end.
+
+get_update_info(Data, Url) ->
+    Info = #{valid := #{type := system, id := ValidSys}} = get_local_info(Data),
+    % Enable bootloader update to get all the update objects available
+    case load_manifest(Data, Url, #{update_bootloader => true}) of
+        {error, _Reason} ->
+            Info#{update => undefined};
+        {ok, Manifest} ->
+            Info2 = Info#{update => grisp_updater_manifest:get_info(Manifest)},
+            case get_updatable(Data, ValidSys, Manifest) of
+                {error, _Reason} ->
+                    Info2#{target => undefined};
+                {ok, TargetSys, _TargetSpec} ->
+                    Info2#{target => format_system_info(TargetSys)}
+            end
+    end.
+
 handle_event({call, From}, get_status, State,
              #data{update = undefined}) ->
     {keep_state_and_data, [{reply, From, State}]};
@@ -249,17 +299,29 @@ start_update(Data, Url, Mod, Params, Opts) ->
         {error, _Reason} = Error -> Error;
         {ok, Up} ->
             Data2 = Data#data{update = Up},
-            case grisp_updater_source:load(Url, <<"MANIFEST.sealed">>) of
+            case load_manifest(Data, Url, Opts) of
                 {error, _Reason} = Error -> Error;
-                {ok, Bin} ->
-                    case open_manifest(Data, Bin, Opts) of
-                        {error, _Reason} = Error -> Error;
-                        {ok, #manifest{objects = []}} ->
-                            update_done(Data2);
-                        {ok, Manifest} ->
-                            do_start_update(Data2, Manifest)
-                    end
+                {ok, #manifest{objects = []}} ->
+                    update_done(Data2);
+                {ok, Manifest} ->
+                    do_start_update(Data2, Manifest)
             end
+    end.
+
+-ifdef(USE_UNSEALED_MANIFEST).
+
+load_manifest(_Data, Url, Opts) ->
+    case grisp_updater_source:load(Url, <<"MANIFEST">>) of
+        {error, _Reason} = Error -> Error;
+        {ok, Bin} -> grisp_updater_manifest:parse_data(Bin, Opts)
+    end.
+
+-else. % USE_UNSEALED_MANIFEST not defined
+
+load_manifest(Data, Url, Opts) ->
+    case grisp_updater_source:load(Url, <<"MANIFEST.sealed">>) of
+        {error, _Reason} = Error -> Error;
+        {ok, Bin} -> open_manifest(Data, Bin, Opts)
     end.
 
 open_manifest(#data{sig_check = false, sig_certs = Certs}, Box, Opts) ->
@@ -285,6 +347,8 @@ open_manifest(#data{sig_check = true, sig_certs = Certs}, Box, Opts) ->
     catch
         Reason -> {error, Reason}
     end.
+
+-endif.
 
 do_start_update(#data{update = Up} = Data,
                 #manifest{objects = Objs} = Manifest) ->
@@ -314,77 +378,83 @@ check_structure(_Data, _Manifest) ->
     %TODO: validate device partition table ?
     ok.
 
+sys2str(removable) -> <<"removable media">>;
+sys2str(SysId) when is_integer(SysId) ->
+    iolist_to_binary(io_lib:format("system #~w", [SysId])).
+
 select_update_target(_Data, #manifest{structure = undefined}) ->
     {error, missing_structure};
 select_update_target(Data, Manifest) ->
-    case system_get_active(Data) of
-        {removable, _} ->
-            ?LOG_ERROR("Cannot update from a removable media", []),
-            {error, current_system_removable};
-        {_, false} ->
-            ?LOG_ERROR("Cannot update from a system that is not validated", []),
-            {error, current_system_not_validated};
-        {CurrSysId, true} ->
-            ?LOG_INFO("Current validate system: ~w", [CurrSysId]),
-            get_next_system(Data, CurrSysId, Manifest)
+    case system_get_systems(Data) of
+        {BootSys, ValidSys, _NextSys}
+          when is_integer(BootSys), BootSys =/= ValidSys ->
+            ?LOG_ERROR("Cannot update from unvalidated ~s", [sys2str(BootSys)]),
+            {error, boot_system_not_validated};
+        {BootSys, ValidSys, _NextSys} ->
+            case get_updatable(Data, ValidSys, Manifest) of
+                {error, _Reason} = Error -> Error;
+                {ok, BootSys, _TargetSpec} ->
+                    ?LOG_ERROR("Cannot update booted ~s", [sys2str(BootSys)]),
+                    {error, cannot_update_booted_system};
+                {ok, TargetSys, _TargetSpec} = Result ->
+                    ?LOG_INFO("Updating ~s from ~s",
+                              [sys2str(TargetSys), sys2str(BootSys)]),
+                    Result
+            end
     end.
 
-
-
-get_next_system(Data, CurrSysId, Manifest) ->
+get_updatable(Data, ValidSys, Manifest) ->
     case system_get_updatable(Data) of
-        undefined -> select_next_system(Data, CurrSysId, Manifest);
-        {ok, Id, Target} -> {ok, Id, Target};
-        {error, _Reason} = Error -> Error
+        {error, _Reason} = Error -> Error;
+        {ok, _TargetSys, _TargetSpec} = Result -> Result;
+        undefined -> next_system_target(Data, ValidSys, Manifest)
     end.
 
-%TODO: Factorize this code
-select_next_system(Data, CurrSysId,
-                      #manifest{structure = #mbr{} = Structure}) ->
+partition_target(Data, SecSize, #mbr_partition{id = Id, start = Start, size = Size}) ->    
+    partition_target(Data, SecSize, Id, Start, Size);
+partition_target(Data, SecSize, #gpt_partition{id = Id, start = Start, size = Size}) ->
+    partition_target(Data, SecSize, Id, Start, Size).
+
+partition_target(Data, SecSize, Id, Start, Size) ->
+    GlobalTarget = #target{offset = BaseOffset}
+        = system_get_global_target(Data),
+    %TODO: Add some boundary checks
+    Target = GlobalTarget#target{
+        offset = BaseOffset + Start * SecSize,
+        size = Size * SecSize
+    },
+    {ok, Id, Target}.
+
+next_system_target(Data, CurrSys, #manifest{structure = #mbr{} = Structure}) ->
     #mbr{sector_size = SecSize, partitions = Partitions} = Structure,
-    case lists_keysplit(CurrSysId, #mbr_partition.id, Partitions) of
+    case lists_keysplit(CurrSys, #mbr_partition.id, Partitions) of
         not_found ->
-            ?LOG_ERROR("Current system ~w not found in update package MBR structure",
-                       [CurrSysId]),
+            ?LOG_ERROR("Current ~s not found in update package MBR structure",
+                       [sys2str(CurrSys)]),
             {error, current_system_partition_not_found};
         {H, T} ->
             case first_system_partition(T ++ H) of
                 not_found ->
                     ?LOG_ERROR("No appropriate system partition found in update package MBR structure", []),
                     {error, update_system_partition_not_found};
-                #mbr_partition{id = Id, start = Start, size = Size} ->
-                    GlobalTarget = #target{offset = BaseOffset}
-                        = system_get_global_target(Data),
-                    %TODO: Add some boundary checks
-                    Target = GlobalTarget#target{
-                        offset = BaseOffset + Start * SecSize,
-                        size = Size * SecSize
-                    },
-                    {ok, Id, Target}
+                Partition ->
+                    partition_target(Data, SecSize, Partition)
             end
     end;
-select_next_system(Data, CurrSysId,
-                      #manifest{structure = #gpt{} = Structure}) ->
+next_system_target(Data, CurrSys, #manifest{structure = #gpt{} = Structure}) ->
     #gpt{sector_size = SecSize, partitions = Partitions} = Structure,
-    case lists_keysplit(CurrSysId, #gpt_partition.id, Partitions) of
+    case lists_keysplit(CurrSys, #gpt_partition.id, Partitions) of
         not_found ->
-            ?LOG_ERROR("Current system ~w not found in update package GPT structure",
-                       [CurrSysId]),
+            ?LOG_ERROR("Current ~s not found in update package GPT structure",
+                       [sys2str(CurrSys)]),
             {error, current_system_partition_not_found};
         {H, T} ->
             case first_system_partition(T ++ H) of
                 not_found ->
                     ?LOG_ERROR("No appropriate system partition found in update package GPT structure", []),
                     {error, update_system_partition_not_found};
-                #gpt_partition{id = Id, start = Start, size = Size} ->
-                    GlobalTarget = #target{offset = BaseOffset}
-                        = system_get_global_target(Data),
-                    %TODO: Add some boundary checks
-                    Target = GlobalTarget#target{
-                        offset = BaseOffset + Start * SecSize,
-                        size = Size * SecSize
-                    },
-                    {ok, Id, Target}
+                Partition ->
+                    partition_target(Data, SecSize, Partition)
             end
     end.
 
@@ -413,9 +483,9 @@ bootstrap_object(#data{update = #update{objects = [Obj | _],
             Error
     end.
 
-bootstrap_object(Data, Up, #target{device = Device} = ObjTarget, Blocks) ->
+bootstrap_object(Data, Up, ObjTarget, Blocks) ->
     Total = lists:foldl(fun(#block{data_size = S}, T) -> T + S end, 0, Blocks),
-    case grisp_updater_storage:prepare(Device, Total) of
+    case grisp_updater_storage:prepare(ObjTarget, Total) of
         {error, Reason} ->
             update_failed(Data, Reason);
         ok ->
@@ -676,8 +746,8 @@ system_init(#data{system = undefined} = Data, {Mod, Params}) ->
 system_get_global_target(#data{system = {Mod, Sub}}) ->
     Mod:system_get_global_target(Sub).
 
-system_get_active(#data{system = {Mod, Sub}}) ->
-    Mod:system_get_active(Sub).
+system_get_systems(#data{system = {Mod, Sub}}) ->
+    Mod:system_get_systems(Sub).
 
 system_get_updatable(#data{system = {Mod, Sub}}) ->
     try Mod:system_get_updatable(Sub)
@@ -700,13 +770,13 @@ system_prepare_target(#data{system = {Mod, Sub}} = Data, SysId, SysTarget, Spec)
 
 default_system_prepare_target(_Data, _SysId, _SysTarget,
                               #file_target_spec{path = Path}) ->
-    #target{device = Path, offset = 0, size = undefined};
+    #target{device = Path, offset = 0};
 default_system_prepare_target(_Data, _SysId, #target{offset = SysOffset} = SysTarget,
                               #raw_target_spec{context = system, offset = ObjOffset}) ->
     SysTarget#target{offset = SysOffset + ObjOffset};
 default_system_prepare_target(#data{system = {Mod, Sub}}, _SysId, _SysTarget,
                               #raw_target_spec{context = global, offset = Offset}) ->
-    GlobTarget = #target{offset = GlobOffset} = Mod:system_get_global(Sub),
+    GlobTarget = #target{offset = GlobOffset} = Mod:system_get_global_target(Sub),
     GlobTarget#target{offset = GlobOffset + Offset}.
 
 

@@ -8,6 +8,8 @@
 -include_lib("kernel/include/logger.hrl").
 -include_lib("kernel/include/file.hrl").
 
+-include("grisp_updater.hrl").
+
 
 %--- Exports -------------------------------------------------------------------
 
@@ -27,12 +29,13 @@ storage_init(_Opts) ->
     ?LOG_INFO("Initializing GRiSP updater's filesystem storage", []),
     {ok, undefined}.
 
-storage_prepare(State, Device, Size) when is_binary(Device) ->
+storage_prepare(State, #target{device = Device} = Target, ObjSize)
+  when is_binary(Device) ->
     case file:read_file_info(Device) of
         {ok, #file_info{type = device, access = read_write}} -> {ok, State};
         {ok, #file_info{type = device}} -> {error, device_access_error};
         {ok, #file_info{type = regular, access = read_write}} ->
-            case truncate_file(Device, Size) of
+            case truncate_file(Device, file_size(Target, ObjSize)) of
                 {error, _Reason} = Error -> Error;
                 ok -> {ok, State}
             end;
@@ -40,7 +43,7 @@ storage_prepare(State, Device, Size) when is_binary(Device) ->
         {ok, #file_info{}} -> {error, bad_device};
         {error, enoent} ->
             % Assume that if it doesn't exists it is a regular file
-            case truncate_file(Device, Size) of
+            case truncate_file(Device, file_size(Target, ObjSize)) of
                 {error, _Reason} = Error -> Error;
                 ok -> {ok, State}
             end
@@ -77,6 +80,13 @@ storage_terminate(_State, _Reason) ->
 
 
 %--- Internal Functions --------------------------------------------------------
+
+file_size(#target{offset = Offset, size = undefined, total = undefined}, ObjSize) ->
+    Offset + ObjSize;
+file_size(#target{offset = Offset, size = Size, total = undefined}, _ObjSize) ->
+    Offset + Size;
+file_size(#target{total = Total}, _ObjSize) ->
+    Total.
 
 truncate_file(Filename, Size) ->
     case file:open(Filename, [raw, read, write, binary, sync]) of
