@@ -1,5 +1,5 @@
-grisp_updater [WiP]
-=====
+grisp_updater
+=============
 
 GRiSP Software Update Runtime
 
