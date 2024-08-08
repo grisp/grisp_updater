@@ -88,7 +88,7 @@ handle_cast({schedule, #block{id = Id} = Block, Target},
             {noreply, State2, timeout(State2)}
     end;
 handle_cast(Request, State) ->
-    ?LOG_WARNING("Unexpected XXXX cast: ~p", [Request]),
+    ?LOG_WARNING("Unexpected cast: ~p", [Request]),
     {noreply, State, timeout(State)}.
 
 handle_info(timeout, #state{pending = M, schedule = Q} = State) ->

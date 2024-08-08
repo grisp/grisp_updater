@@ -10,6 +10,7 @@
 % API Functions
 -export([parse_data/2]).
 -export([parse_term/2]).
+-export([get_info/1]).
 
 
 %--- API Functions -------------------------------------------------------------
@@ -45,8 +46,22 @@ parse_term(Term, Opts) ->
         throw:Reason -> {error, Reason}
     end.
 
+get_info(#manifest{product = Prod, version = Ver,
+                   desc = Desc, architecture = Arch,
+                   objects = Objects}) ->
+    #{product => Prod, version => Ver,
+      description => Desc, architecture => Arch,
+      objects => [object_info(O) || O <- Objects]}.
+
 
 %--- Internal Functions --------------------------------------------------------
+
+object_info(#object{type = Type, product = Prod, version = Ver, desc = Desc,
+                    block_count = BlockCount, data_size = DataSize,
+                    block_size = BlockSize}) ->
+    #{type => Type, product => Prod, version => Ver, description => Desc,
+      block_count => BlockCount, data_size => DataSize,
+      block_size => BlockSize}.
 
 parse_manifest(Props, Stack, Opts) ->
     Format = check_format(Props, Opts),
