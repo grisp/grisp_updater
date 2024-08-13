@@ -4,6 +4,7 @@
 %--- Exports -------------------------------------------------------------------
 
 % API functions
+-export([info/0, info/1]).
 -export([update/1, update/2]).
 -export([start/3, start/4]).
 -export([status/0]).
@@ -12,6 +13,12 @@
 
 
 %--- API Functions -------------------------------------------------------------
+
+info() ->
+    grisp_updater_manager:get_info().
+
+info(Url) ->
+    grisp_updater_manager:get_info(Url).
 
 update(Url) ->
     grisp_updater_manager:update(Url, #{}).

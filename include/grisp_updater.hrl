@@ -4,7 +4,8 @@
 -record(target, {
     device :: binary(),
     offset :: non_neg_integer(),
-    size :: undefined | non_neg_integer()
+    size :: undefined | non_neg_integer(),
+    total :: undefined | non_neg_integer()
 }).
 
 -type target() :: #target{}.
