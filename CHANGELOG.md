@@ -8,6 +8,8 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [2.0.0] - 2024-09-05
+
 ### Fixed
 
  - Fix file truncating causing image file in dummy system to be badly
@@ -39,5 +41,6 @@ and this project adheres to
 
 First release.
 
-[Unreleased]: https://github.com/grisp/grisp_updater/compare/1.0.0...HEAD
+[Unreleased]: https://github.com/grisp/grisp_updater/compare/2.0.0...HEAD
+[2.0.0]: https://github.com/grisp/grisp_updater/compare/1.0.0...2.0.0
 [1.0.0]: https://github.com/grisp/grisp_updater/compare/5647c909d388910503e3b9395b03cc55d879e64b...1.0.0

@@ -1,9 +1,8 @@
-grisp_updater
-=============
+# grisp_updater
 
 GRiSP Software Update Runtime
 
-Build
------
+
+## Build
 
     $ rebar3 compile

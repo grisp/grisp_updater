@@ -1,17 +1,37 @@
-{application, grisp_updater,
- [{description, "GRiSP Software Update Runtime"},
-  {vsn, "1.0.0"},
-  {registered, []},
-  {mod, {grisp_updater_app, []}},
-  {applications,
-   [kernel,
-    stdlib,
-    gun,
-    uuid,
-    termseal
-   ]},
-  {env,[]},
-  {modules, []},
-  {licenses, ["Apache 2.0"]},
-  {links, []}
+{application, grisp_updater, [
+    {description, "GRiSP Software Update Runtime"},
+    {vsn, "2.0.0"},
+    {registered, []},
+    {mod, {grisp_updater_app, []}},
+    {applications, [
+        kernel,
+        stdlib,
+        gun,
+        uuid,
+        termseal
+    ]},
+    {env,[]},
+    {modules, []},
+
+    {licenses, ["Apache-2.0"]},
+    {links, [
+        {"GitHub",
+            "https://github.com/grisp/grisp_updater"
+        },
+        {"Changelog",
+            "https://github.com/grisp/grisp_updater/blob/main/CHANGELOG.md"
+        },
+        {"Homepage",
+            "https://www.grisp.org"
+        }
+    ]},
+    {files, [
+        "LICENSE",
+        "README.md",
+        "rebar.*",
+        "rebar.config",
+        "rebar.lock",
+        "include",
+        "src"
+    ]}
  ]}.
