@@ -284,14 +284,14 @@ handle_event({call, From}, get_status, State,
 handle_event({call, From}, get_status, State,
              #data{update = #update{stats = Stats}}) ->
     {keep_state_and_data, [{reply, From, {State, Stats}}]};
-handle_event({call, From}, Msg, _State, _Data) ->
-    ?LOG_WARNING("Unexpected call from ~p: ~p", [Msg]),
+handle_event({call, From}, Msg, State, _Data) ->
+    ?LOG_WARNING("Unexpected call from ~p in state ~p: ~p", [From, State, Msg]),
     {keep_state_and_data, [{reply, From, {error, unexpected_call}}]};
-handle_event(cast, Msg, _State, _Data) ->
-    ?LOG_WARNING("Unexpected cast: ~p", [Msg]),
+handle_event(cast, Msg, State, _Data) ->
+    ?LOG_WARNING("Unexpected castin state ~p: ~p", [State, Msg]),
     keep_state_and_data;
-handle_event(info, Msg, _State, _Data) ->
-    ?LOG_WARNING("Unexpected message: ~p", [Msg]),
+handle_event(info, Msg, State, _Data) ->
+    ?LOG_WARNING("Unexpected message in state ~p: ~p", [State, Msg]),
     keep_state_and_data.
 
 start_update(Data, Url, Mod, Params, Opts) ->
