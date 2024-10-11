@@ -32,10 +32,11 @@
     {ok, State :: term()} | {error, term()}.
 -callback progress_update(State :: term(), Statistics :: statistics()) ->
     {ok, State :: term()}.
--callback progress_warning(State :: term(), Reason :: term(), Msg :: binary()) ->
+-callback progress_warning(State :: term(), Reason :: term(),
+                           Msg :: binary() | undefined) ->
     {ok, State :: term()}.
 -callback progress_error(State :: term(), Statistics :: statistics(),
-                         Reason :: term(), Msg :: binary()) ->
+                         Reason :: term(), Msg :: binary() | undefined) ->
     ok.
 -callback progress_done(State :: term(), Statistics :: statistics()) ->
     ok.

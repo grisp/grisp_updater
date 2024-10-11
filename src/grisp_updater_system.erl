@@ -36,6 +36,8 @@
     {ok, Target :: target()}.
 -callback system_set_updated(State :: term(), SysId :: system_id()) ->
     {ok, State :: term()} | {error, term()}.
+-callback system_cancel_update(State :: term()) ->
+    {ok, State :: term()}.
 -callback system_validate(State :: term()) ->
     {ok, State :: term()} | {error, term()}.
 -callback system_object_updated(State :: term(), Object :: #object{},

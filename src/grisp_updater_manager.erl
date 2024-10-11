@@ -165,8 +165,9 @@ ready({call, From}, {start_update, Url, Callbacks, Params, Opts}, Data) ->
         {error, Reason} ->
             {keep_state_and_data, [{reply, From, {error, Reason}}]}
     end;
-ready({call, From}, cancel_update, _Data) ->
-    {keep_state_and_data, [{reply, From, {error, not_updating}}]};
+ready({call, From}, cancel_update, Data) ->
+    {ok, Data2} = system_cancel_update(Data),
+    {keep_state, Data2, [{reply, From, ok}]};
 ready({call, From}, validate, Data) ->
     case system_validate(Data) of
         {error, Reason} = Error ->
@@ -188,14 +189,29 @@ ready({call, From}, get_status,
 ready({call, From}, get_status,
       #data{update = undefined, last_outcome = LastOutcome}) ->
     {keep_state_and_data, [{reply, From, LastOutcome}]};
+ready(cast, {checker_done, _BlockId, _Outcome}, _Data) ->
+    % Ignore old messages that can still be received after cancelling
+    keep_state_and_data;
+ready(cast, {checker_error, _BlockId, _Reason}, _Data) ->
+    % Ignore old messages that can still be received after cancelling
+    keep_state_and_data;
+ready(cast, {loader_done, _BlockId}, _Data) ->
+    % Ignore old messages that can still be received after cancelling
+    keep_state_and_data;
+ready(cast, {loader_failed, _BlockId, _Reason}, _Data) ->
+    % Ignore old messages that can still be received after cancelling
+    keep_state_and_data;
+ready(cast, {loader_error, _BlockId, _Reason}, _Data) ->
+    % Ignore old messages that can still be received after cancelling
+    keep_state_and_data;
 ready(EventType, Event, Data) ->
     handle_event(EventType, Event, ready, Data).
 
 updating({call, From}, {start_update, _, _, _, _}, _Data) ->
     {keep_state_and_data, [{reply, From, {error, already_updating}}]};
-updating({call, From}, cancel_update, _Data) ->
-    %TODO: Implemente cancelation
-    {keep_state_and_data, [{reply, From, {error, not_implemented}}]};
+updating({call, From}, cancel_update, Data) ->
+    {done, Data2} = update_failed(Data, canceled),
+    {next_state, ready, Data2, [{reply, From, ok}]};
 updating({call, From}, validate, _Data) ->
     {keep_state_and_data, [{reply, From, {error, updating}}]};
 updating({call, From}, get_status,
@@ -288,7 +304,7 @@ handle_event({call, From}, Msg, State, _Data) ->
     ?LOG_WARNING("Unexpected call from ~p in state ~p: ~p", [From, State, Msg]),
     {keep_state_and_data, [{reply, From, {error, unexpected_call}}]};
 handle_event(cast, Msg, State, _Data) ->
-    ?LOG_WARNING("Unexpected castin state ~p: ~p", [State, Msg]),
+    ?LOG_WARNING("Unexpected cast in state ~p: ~p", [State, Msg]),
     keep_state_and_data;
 handle_event(info, Msg, State, _Data) ->
     ?LOG_WARNING("Unexpected message in state ~p: ~p", [State, Msg]),
@@ -786,6 +802,10 @@ system_set_updated(#data{system = {Mod, Sub}} = Data, SysId) ->
         {ok, Sub2} -> {ok, Data#data{system = {Mod, Sub2}}}
     end.
 
+system_cancel_update(#data{system = {Mod, Sub}} = Data) ->
+    {ok, Sub2} = Mod:system_cancel_update(Sub),
+    {ok, Data#data{system = {Mod, Sub2}}}.
+
 system_validate(#data{system = {Mod, Sub}} = Data) ->
     case Mod:system_validate(Sub) of
         {error, _Reason} = Error -> Error;
@@ -834,7 +854,7 @@ progress_update(#update{progress = {Mod, Params}} = Up, Stats) ->
 progress_error(#update{progress = undefined}, _Stats, _Reason) ->
     ok;
 progress_error(#update{progress = {Mod, Params}}, Stats, Reason) ->
-    Mod:progress_error(Params, Stats, Reason).
+    Mod:progress_error(Params, Stats, Reason, undefined).
 
 progress_done(#update{progress = undefined}, _Stats) ->
     ok;

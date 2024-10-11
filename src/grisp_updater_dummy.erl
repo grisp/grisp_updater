@@ -19,6 +19,7 @@
 -export([system_prepare_update/2]).
 -export([system_prepare_target/4]).
 -export([system_set_updated/2]).
+-export([system_cancel_update/1]).
 -export([system_validate/1]).
 -export([system_terminate/2]).
 
@@ -115,6 +116,10 @@ system_prepare_target(#state{device = Device}, _SysId, _SysTarget,
 
 system_set_updated(State, SystemId) ->
     ?LOG_DEBUG("System ~b marked as update", [SystemId]),
+    {ok, State}.
+
+system_cancel_update(State) ->
+    ?LOG_DEBUG("Update canceled", []),
     {ok, State}.
 
 system_validate(State) ->
