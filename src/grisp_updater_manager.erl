@@ -177,12 +177,6 @@ ready({call, From}, validate, Data) ->
             ?LOG_INFO("Running system validated", []),
             {keep_state, Data2, [{reply, From, ok}]}
     end;
-ready({call, From}, get_info, Data) ->
-    Result = get_local_info(Data),
-    {keep_state_and_data, [{reply, From, Result}]};
-ready({call, From}, {get_info, Url}, Data) ->
-    Result = get_update_info(Data, Url),
-    {keep_state_and_data, [{reply, From, Result}]};
 ready({call, From}, get_status,
       #data{update = undefined, last_outcome = undefined}) ->
     {keep_state_and_data, [{reply, From, ready}]};
@@ -300,6 +294,12 @@ handle_event({call, From}, get_status, State,
 handle_event({call, From}, get_status, State,
              #data{update = #update{stats = Stats}}) ->
     {keep_state_and_data, [{reply, From, {State, Stats}}]};
+handle_event({call, From}, get_info, _State, Data) ->
+    Result = get_local_info(Data),
+    {keep_state_and_data, [{reply, From, Result}]};
+handle_event({call, From}, {get_info, Url}, _State, Data) ->
+    Result = get_update_info(Data, Url),
+    {keep_state_and_data, [{reply, From, Result}]};
 handle_event({call, From}, Msg, State, _Data) ->
     ?LOG_WARNING("Unexpected call from ~p in state ~p: ~p", [From, State, Msg]),
     {keep_state_and_data, [{reply, From, {error, unexpected_call}}]};
