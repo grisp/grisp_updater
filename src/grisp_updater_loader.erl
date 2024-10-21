@@ -196,37 +196,45 @@ got_sink_error(State, _StreamRef, Id, {http_error, Code} = Reason)
 got_sink_error(#state{pending = PendMap, streams = StreamMap} = State,
                StreamRef, Id, Reason) ->
     %TODO: Figure out which errors are fatal and which are recoverable
-    #{StreamRef := #stream{id = Id}} = StreamMap,
-    #{Id := #pending{stream = StreamRef}} = PendMap,
-    grisp_updater_manager:loader_failed(Id, Reason),
-    start_streams(cancel_pending(State, Id)).
+    case maps:find(StreamRef, StreamMap) of
+        error -> State;
+        {ok, #stream{id = Id}} ->
+            #{Id := #pending{stream = StreamRef}} = PendMap,
+            grisp_updater_manager:loader_failed(Id, Reason),
+            start_streams(cancel_pending(State, Id))
+    end.
 
 got_sink_data(#state{pending = PendMap, streams = StreamMap} = State,
               StreamRef, Id, Data) ->
-    #{StreamRef := #stream{id = Id}} = StreamMap,
-    #{Id := #pending{stream = StreamRef}} = PendMap,
-    case got_data(State, StreamRef, Id, Data) of
-        {error, Reason} ->
-            %TODO: Figure out which errors are fatal and which are recoverable
-            grisp_updater_manager:loader_failed(Id, Reason),
-            start_streams(cancel_pending(State, Id));
-        {ok, State2} ->
-            State2
+    case maps:find(StreamRef, StreamMap) of
+        error -> State;
+        {ok, #stream{id = Id}} ->
+            #{Id := #pending{stream = StreamRef}} = PendMap,
+            case got_data(State, StreamRef, Id, Data) of
+                {error, Reason} ->
+                    %TODO: Figure out which errors are fatal and which are recoverable
+                    grisp_updater_manager:loader_failed(Id, Reason),
+                    start_streams(cancel_pending(State, Id));
+                {ok, State2} ->
+                    State2
+            end
     end.
 
 got_sink_done(#state{pending = PendMap, streams = StreamMap} = State,
               StreamRef, Id, Data) ->
-    #{StreamRef := #stream{id = Id}} = StreamMap,
-    #{Id := #pending{stream = StreamRef}} = PendMap,
-    case got_data(State, StreamRef, Id, Data) of
-        {error, Reason} ->
-            %TODO: Figure out which errors are fatal and which are recoverable
-            grisp_updater_manager:loader_failed(Id, Reason),
-            start_streams(cancel_pending(State, Id));
-        {ok, State2} ->
-            start_streams(stream_terminated(State2, StreamRef))
+    case maps:find(StreamRef, StreamMap) of
+        error -> State;
+        {ok, #stream{id = Id}} ->
+            #{Id := #pending{stream = StreamRef}} = PendMap,
+            case got_data(State, StreamRef, Id, Data) of
+                {error, Reason} ->
+                    %TODO: Figure out which errors are fatal and which are recoverable
+                    grisp_updater_manager:loader_failed(Id, Reason),
+                    start_streams(cancel_pending(State, Id));
+                {ok, State2} ->
+                    start_streams(stream_terminated(State2, StreamRef))
+            end
     end.
-
 
 got_data(#state{pending = PendMap, streams = StreamMap} = State,
          StreamRef, Id, BlockData) ->
