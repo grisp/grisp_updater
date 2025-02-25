@@ -8,6 +8,8 @@ and this project adheres to
 
 ## [Unreleased]
 
+- Upgraded gun to version "2.1.0"
+
 ## [2.1.0] - 2024-10-12
 
 ### Added
@@ -29,7 +31,7 @@ and this project adheres to
  - Fix file truncating causing image file in dummy system to be badly
    truncated [grisp/#10](https://github.com/grisp/grisp_updater/pull/10)
  - Fix comments and type spec typos [grisp/#10](https://github.com/grisp/grisp_updater/pull/10)
- 
+
 ### Changed
 
  - Changed the grisp_updater_system behaviour's system_get_active/1 callback to
