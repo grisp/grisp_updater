@@ -8,6 +8,10 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [2.1.1] - 2025-02-25
+
+### Changed
+
 - Upgraded gun to version "2.1.0"
 
 ## [2.1.0] - 2024-10-12
@@ -57,7 +61,8 @@ and this project adheres to
 
 First release.
 
-[Unreleased]: https://github.com/grisp/grisp_updater/compare/2.1.0...HEAD
+[Unreleased]: https://github.com/grisp/grisp_updater/compare/2.1.1...HEAD
+[2.1.1]: https://github.com/grisp/grisp_updater/compare/2.1.0...2.1.1
 [2.1.0]: https://github.com/grisp/grisp_updater/compare/2.0.0...2.1.0
 [2.0.0]: https://github.com/grisp/grisp_updater/compare/1.0.0...2.0.0
 [1.0.0]: https://github.com/grisp/grisp_updater/compare/5647c909d388910503e3b9395b03cc55d879e64b...1.0.0
