@@ -12,21 +12,31 @@
 
 %--- Behaviour Definition ------------------------------------------------------
 
+-doc "Initialize storage backend. Set up any resources and return State.".
 -callback storage_init(Opts :: map()) ->
     {ok, State :: term()} | {error, term()}.
+-doc """
+Prepare the target before writing an object of given size. May pre-size
+files or verify device availability.
+""".
 -callback storage_prepare(State :: term(), Target :: target(),
                           ObjSize :: non_neg_integer()) ->
     ok | {error, term()}.
+-doc "Open a device or file and return an opaque Descriptor for read/write.".
 -callback storage_open(State :: term(), Device :: binary()) ->
     {ok, Descriptor :: term(), State :: term()} | {error, term()}.
+-doc "Write data at an absolute offset from beginning of device/file.".
 -callback storage_write(State :: term(), Descriptor :: term(),
                 Offset :: non_neg_integer(), Data :: iolist()) ->
     {ok, State :: term()} | {error, term()}.
+-doc "Read data at an absolute offset. May return <<>> on EOF.".
 -callback storage_read(State :: term(), Descriptor :: term(),
                Offset :: non_neg_integer(), Size :: non_neg_integer()) ->
     {ok, Data :: binary(), State :: term()} | {error, term()}.
+-doc "Close the Descriptor.".
 -callback storage_close(State :: term(), Descriptor :: term()) ->
     {ok, State :: term()}.
+-doc "Termination hook for cleanup.".
 -callback storage_terminate(State :: term(), Reason :: term()) ->
     ok.
 

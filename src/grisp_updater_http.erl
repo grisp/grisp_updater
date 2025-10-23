@@ -15,9 +15,17 @@
 
 %--- Behaviour Definition ------------------------------------------------------
 
+-doc """
+Initialize optional HTTP HAL that customizes connections/requests
+(TLS, auth). Return opaque state.
+""".
 -callback http_init(Options :: map()) ->
     {ok, State :: term()} | {error, REason :: term()}.
 
+-doc """
+Given a URL, return {Host,Port,Opts}. Return not_supported to delegate
+to another backend.
+""".
 -callback http_connection_options(State :: term(), Url :: binary()) ->
     {ok, Host :: inet:hostname() | inet:ip_address(),
          Port :: inet:port_number(),
@@ -25,6 +33,7 @@
          State :: term()}
   | not_supported | {error, term()}.
 
+-doc "Customize request path and headers before issuing the HTTP request.".
 -callback http_request_options(State :: term(), Method :: method(),
                                Url :: binary(), Path :: binary()) ->
     {ok, Path :: binary(), Headers :: [{binary(), binary()}], State :: term()}
