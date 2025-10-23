@@ -284,7 +284,7 @@ close_connection(#state{connections = ConnMap} = State, ConnPid) ->
 conn_buffer_packet(#conn{size = Size, data = Buff} = Conn,
                    MinPacketSize, Data, IsFinal) ->
     Size2 = Size + byte_size(Data),
-    case (Size >= MinPacketSize) or IsFinal of
+    case (Size2 >= MinPacketSize) or IsFinal of
         false ->
             {wait, Conn#conn{size = Size2, data = [Data | Buff]}};
         true ->
