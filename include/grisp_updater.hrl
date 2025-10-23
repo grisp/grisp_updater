@@ -61,7 +61,7 @@
 }).
 
 -record(mbr_partition, {
-    role :: boot | system | data,
+    role :: boot | system | data | reserved,
     id :: undefined | non_neg_integer(),
     type :: dos,
     start :: non_neg_integer(),
@@ -74,7 +74,7 @@
 }).
 
 -record(gpt_partition, {
-    role :: boot | system | data,
+    role :: boot | system | data | reserved,
     id :: undefined | non_neg_integer(),
     type :: uuid:uuid(),
     uuid :: uuid:uuid(),

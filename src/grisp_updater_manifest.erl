@@ -129,7 +129,7 @@ parse_mbr_partitions([{Role, Props} | Rem], I, Stack, _Opts, Acc)
     },
     parse_mbr_partitions(Rem, I + 1, Stack, _Opts, [Part | Acc]);
 parse_mbr_partitions([{Role, Props} | Rem], I, Stack, _Opts, Acc)
-  when Role =:= data; Role =:= boot ->
+  when Role =:= data; Role =:= boot; Role =:= reserved ->
     %TODO: Factorize this duplicated code
     Stack2 = [Role, I | Stack],
     Part = #mbr_partition{
@@ -160,7 +160,7 @@ parse_gpt_partitions([{Role, Props} | Rem], I, Stack, _Opts, Acc)
     },
     parse_gpt_partitions(Rem, I + 1, Stack, _Opts, [Part | Acc]);
 parse_gpt_partitions([{Role, Props} | Rem], I, Stack, _Opts, Acc)
-  when Role =:= data; Role =:= boot ->
+  when Role =:= data; Role =:= boot; Role =:= reserved ->
     %TODO: Factorize this duplicated code
     Stack2 = [Role, I | Stack],
     Part = #gpt_partition{
