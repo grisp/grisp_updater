@@ -317,10 +317,19 @@ start_update(Data, Url, Mod, Params, Opts) ->
             Data2 = Data#data{update = Up},
             case load_manifest(Data, Url, Opts) of
                 {error, _Reason} = Error -> Error;
-                {ok, #manifest{objects = []}} ->
-                    update_done(Data2);
-                {ok, Manifest} ->
-                    do_start_update(Data2, Manifest)
+                {ok, #manifest{} = Manifest} ->
+                    Info0 = grisp_updater_manifest:get_info(Manifest),
+                    Info = Info0#{url => Url},
+                    case system_update_init(Data2, Info) of
+                        {error, _Reason} = Error -> Error;
+                        {ok, Data3} ->
+                            case Manifest of
+                                #manifest{objects = []} ->
+                                    update_done(Data3);
+                                _ ->
+                                    do_start_update(Data3, Manifest)
+                            end
+                    end
             end
     end.
 
@@ -814,6 +823,14 @@ system_validate(#data{system = {Mod, Sub}} = Data) ->
 
 system_object_updated(#data{system = {Mod, Sub}} = Data, Object, Target) ->
     try Mod:system_object_updated(Sub, Object, Target) of
+        {error, _Reason} = Error -> Error;
+        {ok, Sub2} -> {ok, Data#data{system = {Mod, Sub2}}}
+    catch
+        error:undef -> {ok, Data}
+    end.
+
+system_update_init(#data{system = {Mod, Sub}} = Data, Info) ->
+    try Mod:system_update_init(Sub, Info) of
         {error, _Reason} = Error -> Error;
         {ok, Sub2} -> {ok, Data#data{system = {Mod, Sub2}}}
     catch
