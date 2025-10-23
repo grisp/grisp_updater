@@ -235,4 +235,4 @@ storage_close(#state{storage = {Mod, Sub}} = State, Descriptor) ->
     {ok, State#state{storage = {Mod, Sub2}}}.
 
 storage_terminate(#state{storage = {Mod, Sub}}, Reason) ->
-    Mod:terminate(Sub, Reason).
+    Mod:storage_terminate(Sub, Reason).
