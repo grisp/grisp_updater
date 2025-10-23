@@ -46,11 +46,13 @@ parse_term(Term, Opts) ->
         throw:Reason -> {error, Reason}
     end.
 
-get_info(#manifest{product = Prod, version = Ver,
+get_info(#manifest{product = Prod, version = Ver, vcs = Vcs,
+                   uuid = Uuid, author = Author,
                    desc = Desc, architecture = Arch,
-                   objects = Objects}) ->
-    #{product => Prod, version => Ver,
-      description => Desc, architecture => Arch,
+                   platform = Platform, objects = Objects}) ->
+    #{product => Prod, version => Ver, vcs => Vcs,
+      uuid => Uuid, author => Author, description => Desc,
+      architecture => Arch, platform => Platform,
       objects => [object_info(O) || O <- Objects]}.
 
 
@@ -73,8 +75,12 @@ parse_manifest(Props, Stack, Opts) ->
         format = Format,
         product = get_reqbin(Props, Stack, product),
         version = get_reqver(Props, Stack, version),
+        vcs = get_optbin(Props, Stack, vcs),
+        uuid = get_optbin(Props, Stack, uuid),
+        author = get_optbin(Props, Stack, author),
         desc = get_optbin(Props, Stack, description),
         architecture = get_reqbin(Props, Stack, architecture),
+        platform = get_optbin(Props, Stack, platform),
         structure = Structure,
         objects = Objects,
         block_count = C,
