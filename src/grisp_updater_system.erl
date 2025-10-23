@@ -56,6 +56,15 @@ aborts the update (no fallback).
 """.
 -callback system_get_updatable(State :: term()) ->
     {ok, SysId :: system_id(), SystemTarget :: target()} | {error, Reason :: term}.
+
+-doc """
+Called once the update manifest is loaded and before any object is
+written. Provides high-level firmware metadata (product, version,
+objects, etc.) so the HAL can persist or validate it and keep any data
+it needs in its State.
+""".
+-callback system_update_init(State :: term(), Info :: map()) ->
+    {ok, State :: term()} | {error, term()}.
 -doc """
 Prepare the chosen system slot for update (e.g., unmount filesystem,
 ensure not the booted slot). Must not write object data. Return the
@@ -105,4 +114,5 @@ actions such as sync, metadata updates, or per-object validation.
     ok.
 
 -optional_callbacks([system_get_updatable/1, system_prepare_target/4,
-                     system_object_updated/3, system_updated/1]).
+                     system_object_updated/3, system_updated/1,
+                     system_update_init/2]).
