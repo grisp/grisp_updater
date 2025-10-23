@@ -28,16 +28,24 @@
 
 %--- Behaviour Definition ------------------------------------------------------
 
+-doc """
+Initialize a progress reporter. The returned State is passed to all
+progress_* callbacks.
+""".
 -callback progress_init(Opts :: map()) ->
     {ok, State :: term()} | {error, term()}.
+-doc "Called frequently as the update proceeds. Should return quickly.".
 -callback progress_update(State :: term(), Statistics :: statistics()) ->
     {ok, State :: term()}.
+-doc "Optional warning hook for non-fatal conditions.".
 -callback progress_warning(State :: term(), Reason :: term(),
                            Msg :: binary() | undefined) ->
     {ok, State :: term()}.
+-doc "Fatal error: finalize and notify the caller.".
 -callback progress_error(State :: term(), Statistics :: statistics(),
                          Reason :: term(), Msg :: binary() | undefined) ->
     ok.
+-doc "Successful completion notification.".
 -callback progress_done(State :: term(), Statistics :: statistics()) ->
     ok.
 

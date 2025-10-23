@@ -10,17 +10,31 @@
 
 %--- Behaviour Definition ------------------------------------------------------
 
+-doc "Initialize a source backend with Opts. Return opaque State.".
 -callback source_init(Opts :: map()) ->
     {ok, State :: term()} | {error, term()}.
+-doc """
+Open a session for Url if supported; return SourceRef used for
+subsequent streaming.
+""".
 -callback source_open(State :: term(), Url :: binary(), Opts :: map()) ->
     {ok, SourceRef :: term(), State :: term()} | not_supported | {error, term()}.
+-doc """
+Start streaming or return full data. For streams, later emit data/done
+via source_handle/2.
+""".
 -callback source_stream(State :: term(), SourceRef :: term(),
                         Path :: binary(), Opts :: map()) ->
     {stream, StreamRef :: term(), State :: term()}
   | {data, Data :: binary(), State :: term()}
   | {error, term()}.
+-doc "Cancel an active stream.".
 -callback source_cancel(State :: term(), SourceRef :: term(), StreamRef :: term()) ->
     State :: term().
+-doc """
+Handle backend messages. Return pass | {ok,State} |
+{data|done|stream_error|source_error,...}.
+""".
 -callback source_handle(State :: term(), Msg :: term()) ->
     pass
   | {ok, State :: term}
@@ -28,8 +42,10 @@
   | {done, StreamRef :: term(), Data :: binary(), State :: term()}
   | {stream_error, [StreamRef :: term()], Reason :: term(), State :: term()}
   | {source_error, SourceRef :: term(), Reason :: term(), State :: term()}.
+-doc "Close an opened session.".
 -callback source_close(State :: term(), SourceRef :: term()) ->
     State :: term().
+-doc "Termination hook for cleanup.".
 -callback source_terminate(State :: term(), Reason :: term()) ->
     ok.
 
