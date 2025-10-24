@@ -441,14 +441,17 @@ partition_target(Data, SecSize, #gpt_partition{id = Id, start = Start, size = Si
     partition_target(Data, SecSize, Id, Start, Size).
 
 partition_target(Data, SecSize, Id, Start, Size) ->
-    GlobalTarget = #target{offset = BaseOffset}
-        = system_get_global_target(Data),
-    %TODO: Add some boundary checks
-    Target = GlobalTarget#target{
-        offset = BaseOffset + Start * SecSize,
-        size = Size * SecSize
-    },
-    {ok, Id, Target}.
+    % Obtain global base target; if not available, fail gracefully
+    case system_get_global_target(Data) of
+        {error, Reason} -> {error, Reason};
+        {ok, #target{offset = BaseOffset} = GlobalTarget} ->
+            %TODO: Add some boundary checks
+            Target = GlobalTarget#target{
+                offset = BaseOffset + Start * SecSize,
+                size = Size * SecSize
+            },
+            {ok, Id, Target}
+    end.
 
 next_system_target(Data, CurrSys, #manifest{structure = #mbr{} = Structure}) ->
     #mbr{sector_size = SecSize, partitions = Partitions} = Structure,
@@ -769,7 +772,11 @@ system_init(#data{system = undefined} = Data, {Mod, Params}) ->
     end.
 
 system_get_global_target(#data{system = {Mod, Sub}}) ->
-    Mod:system_get_global_target(Sub).
+    try Mod:system_get_global_target(Sub) of
+        #target{} = T -> {ok, T}
+    catch
+        error:undef -> {error, missing_global_target}
+    end.
 
 system_get_systems(#data{system = {Mod, Sub}}) ->
     Mod:system_get_systems(Sub).
@@ -790,20 +797,22 @@ system_prepare_update(#data{system = {Mod, Sub}} = Data, SysId) ->
 system_prepare_target(#data{system = {Mod, Sub}} = Data, SysId, SysTarget, Spec) ->
     try Mod:system_prepare_target(Sub, SysId, SysTarget, Spec)
     catch error:undef ->
-        {ok, default_system_prepare_target(Data, SysId, SysTarget, Spec)}
+        default_system_prepare_target(Data, SysId, SysTarget, Spec)
     end.
 
 default_system_prepare_target(_Data, _SysId, _SysTarget,
                               #file_target_spec{path = Path}) ->
-    #target{device = Path, offset = 0};
+    {ok, #target{device = Path, offset = 0}};
 default_system_prepare_target(_Data, _SysId, #target{offset = SysOffset} = SysTarget,
                               #raw_target_spec{context = system, offset = ObjOffset}) ->
-    SysTarget#target{offset = SysOffset + ObjOffset};
-default_system_prepare_target(#data{system = {Mod, Sub}}, _SysId, _SysTarget,
+    {ok, SysTarget#target{offset = SysOffset + ObjOffset}};
+default_system_prepare_target(Data, _SysId, _SysTarget,
                               #raw_target_spec{context = global, offset = Offset}) ->
-    GlobTarget = #target{offset = GlobOffset} = Mod:system_get_global_target(Sub),
-    GlobTarget#target{offset = GlobOffset + Offset}.
-
+    case system_get_global_target(Data) of
+        {error, Reason} -> {error, Reason};
+        {ok, #target{offset = GlobOffset} = GlobTarget} ->
+            {ok, GlobTarget#target{offset = GlobOffset + Offset}}
+    end.
 
 system_set_updated(#data{system = {Mod, Sub}} = Data, SysId) ->
     case Mod:system_set_updated(Sub, SysId) of

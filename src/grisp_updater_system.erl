@@ -23,9 +23,12 @@ State is passed to all subsequent callbacks. Keep probing lightweight
     {ok, State :: term()} | {error, term()}.
 -doc """
 Return the global #target{} representing the whole updatable medium
-(e.g., disk/flash device and its base offset). The manager uses this to
-resolve raw targets with context=global or when computing absolute
-addresses. It must remain valid and stable during the update.
+(e.g., disk/flash device and its base offset).
+
+Optional: implement when your manifests use raw targets with
+context=global or when the manager must derive absolute addresses from
+structure. If not implemented and required, the manager fails with a
+clear error (missing_global_target).
 """.
 -callback system_get_global_target(State :: term()) ->
     GlobalTarget :: target().
@@ -115,4 +118,4 @@ actions such as sync, metadata updates, or per-object validation.
 
 -optional_callbacks([system_get_updatable/1, system_prepare_target/4,
                      system_object_updated/3, system_updated/1,
-                     system_update_init/2]).
+                     system_update_init/2, system_get_global_target/1]).
