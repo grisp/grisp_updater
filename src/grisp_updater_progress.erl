@@ -59,7 +59,7 @@ progress_* callbacks.
 -export([progress_init/1]).
 -export([progress_update/2]).
 -export([progress_warning/3]).
--export([progress_error/3]).
+-export([progress_error/4]).
 -export([progress_done/2]).
 
 
@@ -111,9 +111,14 @@ progress_warning(State, Msg, Reason) ->
     ?LOG_WARNING("Update warning; ~s: ~p", [Msg, Reason]),
     {ok, State}.
 
-progress_error(#state{caller = Caller, ref = Ref}, Stats, Reason) ->
+progress_error(#state{caller = Caller, ref = Ref}, Stats, Reason, undefined) ->
     ?LOG_ERROR("Update failed after ~b% : ~p",
                [progress_percent(Stats), Reason]),
+    Caller ! {error, Ref, Reason},
+    ok;
+progress_error(#state{caller = Caller, ref = Ref}, Stats, Reason, Msg) ->
+    ?LOG_ERROR("Update failed after ~b% : ~s (~p)",
+               [progress_percent(Stats), Msg, Reason]),
     Caller ! {error, Ref, Reason},
     ok.
 
