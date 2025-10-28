@@ -73,7 +73,5 @@ source_terminate(_State, _Reason) ->
 
 %--- Internal Function ---------------------------------------------------------
 
-tarball_path(Path) when is_list(Path) ->
-    filename:join(".", Path);
-tarball_path(Path) when is_binary(Path) ->
-    filename:join(".", unicode:characters_to_list(Path)).
+tarball_path(Path) when is_list(Path) -> Path;
+tarball_path(Path) when is_binary(Path) -> unicode:characters_to_list(Path).
