@@ -327,7 +327,12 @@ start_update(Data, Url, Mod, Params, Opts) ->
                                 #manifest{objects = []} ->
                                     update_done(Data3);
                                 _ ->
-                                    do_start_update(Data3, Manifest)
+                                    case do_start_update(Data3, Manifest) of
+                                        {ok, Data4} -> {ok, Data4};
+                                        {error, Reason} ->
+                                            {ok, _} = system_update_cleanup(Data3),
+                                            {error, Reason}
+                                    end
                             end
                     end
             end
@@ -732,8 +737,9 @@ update_done(#data{update = Up} = Data) ->
     ?LOG_INFO("Marking system ~w as updated", [SysId]),
     case system_set_updated(Data, SysId) of
         {ok, Data2}  ->
+            {ok, Data3} = system_update_cleanup(Data2),
             progress_done(Up, Stats),
-            {done, Data2#data{update = undefined,
+            {done, Data3#data{update = undefined,
                               last_outcome = {success, Stats}}};
         {error, Reason} ->
             ?LOG_INFO("Failed to mark system ~w as updated: ~p",
@@ -746,7 +752,8 @@ update_failed(#data{update = #update{stats = Stats} = Up} = Data, Reason) ->
     grisp_updater_checker:abort(),
     grisp_updater_loader:abort(),
     progress_error(Up, Stats, Reason),
-    {done, Data#data{update = undefined, last_outcome = {error, Reason}}}.
+    {ok, Data2} = system_update_cleanup(Data),
+    {done, Data2#data{update = undefined, last_outcome = {error, Reason}}}.
 
 object_name(#object{product = Name}) when Name =/= undefined -> Name;
 object_name(#object{type = Name}) when Name =/= undefined -> Name.
@@ -850,6 +857,13 @@ system_updated(#data{system = {Mod, Sub}} = Data) ->
     try Mod:system_updated(Sub) of
         {error, _Reason} = Error -> Error;
         {ok, Sub2} -> {ok, Data#data{system = {Mod, Sub2}}}
+    catch
+        error:undef -> {ok, Data}
+    end.
+
+system_update_cleanup(#data{system = {Mod, Sub}} = Data) ->
+    try Mod:system_update_cleanup(Sub) of
+        Sub2 -> {ok, Data#data{system = {Mod, Sub2}}}
     catch
         error:undef -> {ok, Data}
     end.
