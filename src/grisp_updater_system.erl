@@ -112,10 +112,19 @@ actions such as sync, metadata updates, or per-object validation.
 -doc "Called once the entire update succeeded (all objects).".
 -callback system_updated(State :: term()) ->
     {ok, State :: term()} | {error, term()}.
+-doc """
+Guaranteed end-of-update cleanup. Called exactly once after the update
+attempt concludes when system_update_init/2 previously succeeded,
+regardless of outcome (success, failure, or cancel during updating).
+Return the updated State. Cleanup must be best-effort and not fail.
+""".
+-callback system_update_cleanup(State :: term()) ->
+    State :: term().
 -doc "Termination hook for cleanup. Reason indicates shutdown or error cause.".
 -callback system_terminate(State :: term(), Reason :: term()) ->
     ok.
 
 -optional_callbacks([system_get_updatable/1, system_prepare_target/4,
                      system_object_updated/3, system_updated/1,
-                     system_update_init/2, system_get_global_target/1]).
+                     system_update_init/2, system_update_cleanup/1,
+                     system_get_global_target/1]).
