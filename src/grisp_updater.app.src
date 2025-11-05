@@ -1,6 +1,6 @@
 {application, grisp_updater, [
     {description, "GRiSP Software Update Runtime"},
-    {vsn, "2.1.1"},
+    {vsn, "2.2.1"},
     {registered, []},
     {mod, {grisp_updater_app, []}},
     {applications, [
