@@ -166,7 +166,7 @@ ready({call, From}, {start_update, Url, Callbacks, Params, Opts}, Data) ->
             {keep_state_and_data, [{reply, From, {error, Reason}}]}
     end;
 ready({call, From}, cancel_update, Data) ->
-    {ok, Data2} = system_cancel_update(Data),
+    {ok, Data2} = system_cancel_update(Data#data{last_outcome = undefined}),
     {keep_state, Data2, [{reply, From, ok}]};
 ready({call, From}, validate, Data) ->
     case system_validate(Data) of
