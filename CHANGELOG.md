@@ -8,6 +8,30 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-02-06
+
+### Added
+
+- Add reserved partition role support
+- Add support for extra manifest metadata
+- Add optional `system_update_init/2` cleanup callback for releasing resources
+- Add optional system callback to receive firmware info during updates
+- Add `erlang_ls.config` for editor tooling
+
+### Changed
+
+- Make `system_get_global_target/1` optional in the system behaviour
+- Clarify system behaviour callback documentation and lifecycle expectations
+- Update application and dependency versions
+
+### Fixed
+
+- Reset update status correctly when canceling an update
+- Fix tarball inner path handling
+- Fix progress error default callback implementation
+- Fix storage termination callback behavior
+- Fix HTTP packet buffering
+
 ## [2.1.1] - 2025-02-25
 
 ### Changed
@@ -61,7 +85,8 @@ and this project adheres to
 
 First release.
 
-[Unreleased]: https://github.com/grisp/grisp_updater/compare/2.1.1...HEAD
+[Unreleased]: https://github.com/grisp/grisp_updater/compare/2.2.0...HEAD
+[2.2.0]: https://github.com/grisp/grisp_updater/compare/2.1.1...2.2.0
 [2.1.1]: https://github.com/grisp/grisp_updater/compare/2.1.0...2.1.1
 [2.1.0]: https://github.com/grisp/grisp_updater/compare/2.0.0...2.1.0
 [2.0.0]: https://github.com/grisp/grisp_updater/compare/1.0.0...2.0.0
