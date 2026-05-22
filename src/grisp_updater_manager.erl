@@ -257,11 +257,15 @@ format_system_info(SysId) when SysId >= 0, SysId =< 1 ->
     #{type => system, id => SysId}.
 
 get_local_info(Data) ->
-    {BootSys, ValidSys, NextSys} = system_get_systems(Data),
+    #{boot := BootSys,
+      valid := ValidSys,
+      next := NextSys,
+      systems := Systems} = system_get_systems(Data),
     Info = #{
         boot => format_system_info(BootSys),
         valid => format_system_info(ValidSys),
         next => format_system_info(NextSys),
+        systems => Systems,
         target => undefined,
         update => undefined
     },
@@ -416,11 +420,11 @@ select_update_target(_Data, #manifest{structure = undefined}) ->
     {error, missing_structure};
 select_update_target(Data, Manifest) ->
     case system_get_systems(Data) of
-        {BootSys, ValidSys, _NextSys}
+        #{boot := BootSys, valid := ValidSys}
           when is_integer(BootSys), BootSys =/= ValidSys ->
             ?LOG_ERROR("Cannot update from unvalidated ~s", [sys2str(BootSys)]),
             {error, boot_system_not_validated};
-        {BootSys, ValidSys, _NextSys} ->
+        #{boot := BootSys, valid := ValidSys} ->
             case get_updatable(Data, ValidSys, Manifest) of
                 {error, _Reason} = Error -> Error;
                 {ok, BootSys, _TargetSpec} ->
@@ -440,7 +444,7 @@ get_updatable(Data, ValidSys, Manifest) ->
         undefined -> next_system_target(Data, ValidSys, Manifest)
     end.
 
-partition_target(Data, SecSize, #mbr_partition{id = Id, start = Start, size = Size}) ->    
+partition_target(Data, SecSize, #mbr_partition{id = Id, start = Start, size = Size}) ->
     partition_target(Data, SecSize, Id, Start, Size);
 partition_target(Data, SecSize, #gpt_partition{id = Id, start = Start, size = Size}) ->
     partition_target(Data, SecSize, Id, Start, Size).
