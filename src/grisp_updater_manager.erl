@@ -259,13 +259,12 @@ format_system_info(SysId) when SysId >= 0, SysId =< 1 ->
 get_local_info(Data) ->
     #{boot := BootSys,
       valid := ValidSys,
-      next := NextSys,
-      systems := Systems} = system_get_systems(Data),
+      next := NextSys} = Systems = system_get_systems(Data),
     Info = #{
         boot => format_system_info(BootSys),
         valid => format_system_info(ValidSys),
         next => format_system_info(NextSys),
-        systems => Systems,
+        systems => maps:get(systems, Systems, undefined),
         target => undefined,
         update => undefined
     },
@@ -790,7 +789,10 @@ system_get_global_target(#data{system = {Mod, Sub}}) ->
     end.
 
 system_get_systems(#data{system = {Mod, Sub}}) ->
-    Mod:system_get_systems(Sub).
+    case Mod:system_get_systems(Sub) of
+        {Boot, Valid, Next} -> #{boot => Boot, valid => Valid, next => Next};
+        Map when is_map(Map) -> Map
+    end.
 
 system_get_updatable(#data{system = {Mod, Sub}}) ->
     try Mod:system_get_updatable(Sub)
