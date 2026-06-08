@@ -8,6 +8,19 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-06-08
+
+### Added
+
+- Add `systems` metadata to local update info when provided by the system callback
+- Add Zizmor GitHub Actions security analysis workflow
+
+### Changed
+
+- Allow `system_get_systems/1` to return a map with `boot`, `valid`, `next`,
+  and optional `systems` entries while keeping tuple return values backward
+  compatible
+
 ## [2.2.0] - 2026-02-06
 
 ### Added
@@ -85,7 +98,8 @@ and this project adheres to
 
 First release.
 
-[Unreleased]: https://github.com/grisp/grisp_updater/compare/2.2.0...HEAD
+[Unreleased]: https://github.com/grisp/grisp_updater/compare/2.3.0...HEAD
+[2.3.0]: https://github.com/grisp/grisp_updater/compare/2.2.0...2.3.0
 [2.2.0]: https://github.com/grisp/grisp_updater/compare/2.1.1...2.2.0
 [2.1.1]: https://github.com/grisp/grisp_updater/compare/2.1.0...2.1.1
 [2.1.0]: https://github.com/grisp/grisp_updater/compare/2.0.0...2.1.0
