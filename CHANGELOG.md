@@ -8,6 +8,10 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Fixed
+
+- Use patched Gun and Cowlib dependency releases.
+
 ## [2.3.0] - 2026-06-08
 
 ### Added
