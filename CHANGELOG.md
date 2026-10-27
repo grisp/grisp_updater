@@ -8,6 +8,8 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [2.3.1] - 2026-10-27
+
 ### Fixed
 
 - Use patched Gun and Cowlib dependency releases.
@@ -102,7 +104,8 @@ and this project adheres to
 
 First release.
 
-[Unreleased]: https://github.com/grisp/grisp_updater/compare/2.3.0...HEAD
+[Unreleased]: https://github.com/grisp/grisp_updater/compare/2.3.1...HEAD
+[2.3.1]: https://github.com/grisp/grisp_updater/compare/2.3.0...2.3.1
 [2.3.0]: https://github.com/grisp/grisp_updater/compare/2.2.0...2.3.0
 [2.2.0]: https://github.com/grisp/grisp_updater/compare/2.1.1...2.2.0
 [2.1.1]: https://github.com/grisp/grisp_updater/compare/2.1.0...2.1.1
